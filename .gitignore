@@ -2,7 +2,9 @@ third_party/whisper.cpp/
 third_party/portaudio_static/
 models/*.bin
 /kian
+/kian_fullstatic
 audiotest
+.DS_Store
 dist/
 output/
 transcript.txt

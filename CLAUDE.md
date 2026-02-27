@@ -44,9 +44,9 @@ The Makefile sets `C_INCLUDE_PATH`, `LIBRARY_PATH`, `CGO_CFLAGS`, and `CGO_LDFLA
 
 ## Audio routing (macOS)
 
-System audio capture requires two virtual devices configured in Audio MIDI Setup:
-- **Multi-Output Device**: routes audio to speakers/headphones AND BlackHole 2ch simultaneously
-- **Aggregate Device**: combines BlackHole 2ch (system audio) + Built-in Microphone into one input
+System audio capture requires two virtual devices. The built-in setup wizard (`internal/ui/wizard.go`) creates these automatically via CoreAudio API:
+- **Kian Multi-Output**: routes audio to speakers/headphones AND BlackHole 2ch simultaneously
+- **Kian Aggregate**: combines BlackHole 2ch (system audio) + Built-in Microphone into one input
 
 The app's `FindDeviceForMode()` selects the right device:
 - `ModeBoth` → Aggregate Device (3+ channels: BlackHole stereo + mic mono)

@@ -29,24 +29,32 @@ The installer handles the rest automatically, but under the hood Kian needs:
 
 1. Download the latest `Kian-Installer.dmg` from [Releases](../../releases)
 2. Open the DMG, right-click **Install Kian** and select **Open**
-3. Follow the prompts — it will install dependencies and download the model
-4. Complete the one-time audio setup (see below)
+3. Follow the Terminal prompts — it will install BlackHole and download the Whisper model (~1.5 GB)
+4. On first launch, click **Setup Audio Devices...** in the menu bar to complete audio setup
 
 ## Audio setup
 
-To capture system audio, macOS needs two virtual audio devices. The installer opens Audio MIDI Setup and walks you through this, but here's the summary:
+To capture system audio, macOS needs two virtual audio devices (Multi-Output and Aggregate). Kian's built-in setup wizard creates these automatically — just click **Setup Audio Devices...** from the menu bar.
+
+After the wizard finishes, you need to do one manual step:
+
+1. Go to **System Settings → Sound → Output**
+2. Select **Kian Multi-Output**
+
+You'll still hear audio through your speakers/headphones, and Kian will capture it via BlackHole.
+
+> **Tip:** If you switch between speakers and headphones, recreate the Multi-Output Device by running the setup wizard again.
+
+<details>
+<summary>Manual setup (if you prefer)</summary>
 
 ### 1. Create a Multi-Output Device
-
-This sends audio to both your speakers (or headphones) and BlackHole simultaneously.
 
 - Open **Audio MIDI Setup** (Spotlight → "Audio MIDI Setup")
 - Click **+** at the bottom-left → **Create Multi-Output Device**
 - Check **your output device** (e.g. MacBook Air Speakers or your headphones) **+ BlackHole 2ch**
 
 ### 2. Create an Aggregate Device
-
-This combines BlackHole (system audio) and your microphone into a single input that Kian can capture from.
 
 - Click **+** → **Create Aggregate Device**
 - Check **BlackHole 2ch + Built-in Microphone**
@@ -57,9 +65,7 @@ This combines BlackHole (system audio) and your microphone into a single input t
 - Go to **System Settings → Sound → Output**
 - Select **Multi-Output Device**
 
-You'll still hear audio through your speakers/headphones, and Kian will capture it via BlackHole.
-
-> **Tip:** If you switch between speakers and headphones, update the Multi-Output Device to include the current output device.
+</details>
 
 ## Development
 
