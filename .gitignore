@@ -1,0 +1,11 @@
+third_party/whisper.cpp/
+third_party/portaudio_static/
+models/*.bin
+/kian
+audiotest
+dist/
+output/
+transcript.txt
+.idea/
+*.dmg
+.pr-description.md

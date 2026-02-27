@@ -1,0 +1,568 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Kian — Local Audio Transcription for macOS</title>
+  <style>
+    :root {
+      --bg: #0a0a0a;
+      --surface: #141414;
+      --border: #222;
+      --text: #e8e8e8;
+      --text-muted: #888;
+      --accent: #e44;
+      --accent-glow: rgba(228, 68, 68, 0.15);
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* Nav */
+    nav {
+      position: fixed;
+      top: 0;
+      width: 100%;
+      padding: 1rem 2rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      backdrop-filter: blur(20px);
+      background: rgba(10, 10, 10, 0.8);
+      border-bottom: 1px solid var(--border);
+      z-index: 100;
+    }
+    .logo {
+      font-size: 1.4rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+    .logo span { color: var(--accent); }
+    nav a {
+      color: var(--text-muted);
+      text-decoration: none;
+      font-size: 0.9rem;
+      transition: color 0.2s;
+    }
+    nav a:hover { color: var(--text); }
+    .nav-links { display: flex; gap: 2rem; align-items: center; }
+
+    /* Hero */
+    .hero {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 8rem 2rem 4rem;
+      position: relative;
+      overflow: hidden;
+    }
+    .hero::before {
+      content: '';
+      position: absolute;
+      top: -200px;
+      width: 600px;
+      height: 600px;
+      background: radial-gradient(circle, var(--accent-glow) 0%, transparent 70%);
+      border-radius: 50%;
+      pointer-events: none;
+    }
+    .badge {
+      display: inline-block;
+      padding: 0.4rem 1rem;
+      border: 1px solid var(--border);
+      border-radius: 100px;
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      margin-bottom: 2rem;
+      background: var(--surface);
+    }
+    .badge span { color: var(--accent); }
+    h1 {
+      font-size: clamp(2.5rem, 6vw, 4.5rem);
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      line-height: 1.1;
+      max-width: 800px;
+      margin-bottom: 1.5rem;
+    }
+    h1 em {
+      font-style: normal;
+      color: var(--accent);
+    }
+    .hero p {
+      font-size: 1.2rem;
+      color: var(--text-muted);
+      max-width: 520px;
+      margin-bottom: 2.5rem;
+    }
+    .cta-group { display: flex; gap: 1rem; flex-wrap: wrap; justify-content: center; }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.85rem 2rem;
+      border-radius: 10px;
+      font-size: 1rem;
+      font-weight: 600;
+      text-decoration: none;
+      transition: all 0.2s;
+      cursor: pointer;
+      border: none;
+    }
+    .btn-primary {
+      background: var(--accent);
+      color: #fff;
+    }
+    .btn-primary:hover {
+      background: #c33;
+      transform: translateY(-1px);
+      box-shadow: 0 8px 30px rgba(228, 68, 68, 0.3);
+    }
+    .btn-secondary {
+      background: var(--surface);
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+    .btn-secondary:hover {
+      border-color: #444;
+      transform: translateY(-1px);
+    }
+
+    /* Features */
+    .features {
+      padding: 6rem 2rem;
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+    .section-label {
+      text-transform: uppercase;
+      font-size: 0.75rem;
+      font-weight: 600;
+      letter-spacing: 0.1em;
+      color: var(--accent);
+      margin-bottom: 1rem;
+    }
+    .features h2 {
+      font-size: 2.2rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      margin-bottom: 3.5rem;
+      max-width: 500px;
+    }
+    .feature-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 1.5rem;
+    }
+    .feature-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 2rem;
+      transition: border-color 0.2s;
+    }
+    .feature-card:hover { border-color: #333; }
+    .feature-icon {
+      width: 44px;
+      height: 44px;
+      border-radius: 10px;
+      background: var(--accent-glow);
+      border: 1px solid rgba(228, 68, 68, 0.2);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.3rem;
+      margin-bottom: 1.2rem;
+    }
+    .feature-card h3 {
+      font-size: 1.1rem;
+      font-weight: 600;
+      margin-bottom: 0.5rem;
+    }
+    .feature-card p {
+      color: var(--text-muted);
+      font-size: 0.95rem;
+      line-height: 1.6;
+    }
+
+    /* Use cases */
+    .use-cases {
+      padding: 6rem 2rem;
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+    .use-cases h2 {
+      font-size: 2.2rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      margin-bottom: 3.5rem;
+    }
+    .use-case-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 1.5rem;
+    }
+    .use-case {
+      display: flex;
+      gap: 1.2rem;
+      padding: 1.8rem;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      transition: border-color 0.2s;
+    }
+    .use-case:hover { border-color: #333; }
+    .use-case-icon {
+      font-size: 1.5rem;
+      flex-shrink: 0;
+      line-height: 1.4;
+    }
+    .use-case h3 {
+      font-size: 1rem;
+      font-weight: 600;
+      margin-bottom: 0.3rem;
+    }
+    .use-case p {
+      color: var(--text-muted);
+      font-size: 0.9rem;
+      line-height: 1.5;
+    }
+
+    /* How it works */
+    .how-it-works {
+      padding: 6rem 2rem;
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+    .how-it-works h2 {
+      font-size: 2.2rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      margin-bottom: 3.5rem;
+    }
+    .steps {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 2rem;
+    }
+    .step {
+      position: relative;
+      padding-left: 0;
+    }
+    .step-number {
+      font-size: 3rem;
+      font-weight: 800;
+      color: var(--accent);
+      opacity: 0.3;
+      line-height: 1;
+      margin-bottom: 0.8rem;
+    }
+    .step h3 {
+      font-size: 1.05rem;
+      font-weight: 600;
+      margin-bottom: 0.4rem;
+    }
+    .step p {
+      color: var(--text-muted);
+      font-size: 0.9rem;
+    }
+
+    /* Specs */
+    .specs {
+      padding: 6rem 2rem;
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+    .specs h2 {
+      font-size: 2.2rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      margin-bottom: 3.5rem;
+    }
+    .spec-list {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 1rem;
+    }
+    .spec-item {
+      display: flex;
+      align-items: baseline;
+      gap: 0.8rem;
+      padding: 1rem 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .spec-item .label {
+      color: var(--text-muted);
+      font-size: 0.9rem;
+      min-width: 120px;
+    }
+    .spec-item .value {
+      font-weight: 600;
+      font-size: 0.9rem;
+    }
+
+    /* CTA */
+    .final-cta {
+      padding: 8rem 2rem;
+      text-align: center;
+    }
+    .final-cta h2 {
+      font-size: clamp(2rem, 4vw, 3rem);
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      margin-bottom: 1rem;
+    }
+    .final-cta p {
+      color: var(--text-muted);
+      font-size: 1.1rem;
+      margin-bottom: 2.5rem;
+    }
+
+    /* Footer */
+    footer {
+      padding: 3rem 2rem;
+      border-top: 1px solid var(--border);
+      text-align: center;
+      color: var(--text-muted);
+      font-size: 0.85rem;
+    }
+    footer a {
+      color: var(--text-muted);
+      text-decoration: none;
+    }
+    footer a:hover { color: var(--text); }
+    .btn-donate {
+      background: transparent;
+      color: #e44;
+      border: 1px solid rgba(228, 68, 68, 0.4);
+    }
+    .btn-donate:hover {
+      background: var(--accent-glow);
+      border-color: var(--accent);
+      transform: translateY(-1px);
+    }
+
+    .feature-card a, .use-case a, .spec-item a, .hero a.inline-link {
+      color: var(--accent);
+      text-decoration: none;
+      border-bottom: 1px solid rgba(228, 68, 68, 0.3);
+      transition: border-color 0.2s;
+    }
+    .feature-card a:hover, .use-case a:hover, .spec-item a:hover, .hero a.inline-link:hover {
+      border-color: var(--accent);
+    }
+
+    @media (max-width: 600px) {
+      nav { padding: 1rem; }
+      .nav-links { gap: 1rem; }
+      .features, .how-it-works, .specs { padding: 4rem 1.5rem; }
+      .hero { padding: 7rem 1.5rem 3rem; }
+    }
+  </style>
+</head>
+<body>
+
+<nav>
+  <div class="logo"><span>K</span>ian</div>
+  <div class="nav-links">
+    <a href="#features">Features</a>
+    <a href="#use-cases">Use cases</a>
+    <a href="#how-it-works">How it works</a>
+    <a href="https://donate.stripe.com/REPLACE_WITH_YOUR_LINK" class="btn btn-donate" style="padding: 0.5rem 1.2rem; font-size: 0.85rem;">♥ Donate</a>
+    <a href="https://github.com/viktorminko/kian" class="btn btn-secondary" style="padding: 0.5rem 1.2rem; font-size: 0.85rem;">GitHub</a>
+  </div>
+</nav>
+
+<section class="hero">
+  <div class="badge"><span>100% local</span> &middot; No cloud, no subscriptions</div>
+  <h1>Transcribe everything.<br><em>Right on your Mac.</em></h1>
+  <p>Kian sits in your menu bar and transcribes microphone and system audio in real time. Powered by <a href="https://github.com/ggerganov/whisper.cpp" class="inline-link">whisper.cpp</a>. Nothing leaves your machine.</p>
+  <div class="cta-group">
+    <a href="https://github.com/viktorminko/kian/releases/latest" class="btn btn-primary">Download for macOS</a>
+    <a href="https://github.com/viktorminko/kian" class="btn btn-secondary">View source</a>
+  </div>
+</section>
+
+<section class="features" id="features">
+  <div class="section-label">Features</div>
+  <h2>Built for privacy. Built for speed.</h2>
+  <div class="feature-grid">
+
+    <div class="feature-card">
+      <div class="feature-icon">🔒</div>
+      <h3>Completely offline</h3>
+      <p>Runs <a href="https://github.com/ggerganov/whisper.cpp">whisper.cpp</a> locally with GPU acceleration via Apple Metal. Your audio never touches a server.</p>
+    </div>
+
+    <div class="feature-card">
+      <div class="feature-icon">🎙</div>
+      <h3>Mic + system audio</h3>
+      <p>Capture your microphone, system audio from any app, or both at the same time with automatic speaker labeling.</p>
+    </div>
+
+    <div class="feature-card">
+      <div class="feature-icon">📋</div>
+      <h3>Timestamped transcripts</h3>
+      <p>Every session is saved as a clean text file in ~/Documents/Kian/ with timestamps and source labels.</p>
+    </div>
+
+    <div class="feature-card">
+      <div class="feature-icon">⚡</div>
+      <h3>Menu bar app</h3>
+      <p>Lives in your menu bar. One click to start recording. No windows, no clutter. Just works.</p>
+    </div>
+
+    <div class="feature-card">
+      <div class="feature-icon">🔧</div>
+      <h3>Guided setup</h3>
+      <p>Built-in wizard automatically creates the virtual audio devices (via <a href="https://existential.audio/blackhole/">BlackHole</a>) needed for system audio capture.</p>
+    </div>
+
+    <div class="feature-card">
+      <div class="feature-icon">🌍</div>
+      <h3>Multilingual</h3>
+      <p>Powered by <a href="https://github.com/openai/whisper">Whisper</a> large-v3-turbo. Automatic language detection across 100+ languages.</p>
+    </div>
+
+  </div>
+</section>
+
+<section class="use-cases" id="use-cases">
+  <div class="section-label">Use cases</div>
+  <h2>Who is Kian for?</h2>
+  <div class="use-case-grid">
+
+    <div class="use-case">
+      <div class="use-case-icon">💻</div>
+      <div>
+        <h3>Meetings and calls</h3>
+        <p>Transcribe Zoom, Google Meet, or any video call in real time. Capture both sides of the conversation with system audio + mic mode. Never miss an action item again.</p>
+      </div>
+    </div>
+
+    <div class="use-case">
+      <div class="use-case-icon">🎓</div>
+      <div>
+        <h3>Lectures and courses</h3>
+        <p>Record online lectures or YouTube tutorials and get a searchable text transcript. Great for students who want to review material later without re-watching.</p>
+      </div>
+    </div>
+
+    <div class="use-case">
+      <div class="use-case-icon">🎙️</div>
+      <div>
+        <h3>Podcasts and interviews</h3>
+        <p>Turn podcast episodes or recorded interviews into text. Speaker labels help distinguish who said what when using both audio sources.</p>
+      </div>
+    </div>
+
+    <div class="use-case">
+      <div class="use-case-icon">✍️</div>
+      <div>
+        <h3>Voice notes and journaling</h3>
+        <p>Think out loud into your mic and let Kian turn it into text. Faster than typing for brainstorms, drafts, and daily journals.</p>
+      </div>
+    </div>
+
+    <div class="use-case">
+      <div class="use-case-icon">♿</div>
+      <div>
+        <h3>Accessibility</h3>
+        <p>Live captions for any audio playing on your Mac. Useful for the deaf and hard-of-hearing community, or anyone in a noisy environment.</p>
+      </div>
+    </div>
+
+    <div class="use-case">
+      <div class="use-case-icon">🔐</div>
+      <div>
+        <h3>Sensitive conversations</h3>
+        <p>Legal calls, medical consultations, HR discussions. When privacy matters, Kian keeps everything on your machine. No cloud, no third-party access.</p>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<section class="how-it-works" id="how-it-works">
+  <div class="section-label">How it works</div>
+  <h2>Up and running in minutes.</h2>
+  <div class="steps">
+    <div class="step">
+      <div class="step-number">01</div>
+      <h3>Install</h3>
+      <p>Download the DMG, drag to Applications. The installer fetches the Whisper model automatically.</p>
+    </div>
+    <div class="step">
+      <div class="step-number">02</div>
+      <h3>Set up audio</h3>
+      <p>The built-in wizard creates virtual audio devices for system audio capture. Takes about a minute.</p>
+    </div>
+    <div class="step">
+      <div class="step-number">03</div>
+      <h3>Record</h3>
+      <p>Click the menu bar icon, hit Start Recording. Kian transcribes in real time and saves to a text file.</p>
+    </div>
+    <div class="step">
+      <div class="step-number">04</div>
+      <h3>Review</h3>
+      <p>Open the output folder from the menu. Your transcripts are organized by date with full timestamps.</p>
+    </div>
+  </div>
+</section>
+
+<section class="specs">
+  <div class="section-label">Technical</div>
+  <h2>Under the hood.</h2>
+  <div class="spec-list">
+    <div class="spec-item">
+      <span class="label">Engine</span>
+      <span class="value"><a href="https://github.com/ggerganov/whisper.cpp">whisper.cpp</a> with Metal GPU</span>
+    </div>
+    <div class="spec-item">
+      <span class="label">Model</span>
+      <span class="value"><a href="https://huggingface.co/Systran/faster-whisper-large-v3">Whisper large-v3-turbo</a></span>
+    </div>
+    <div class="spec-item">
+      <span class="label">Platform</span>
+      <span class="value">macOS (Apple Silicon + Intel)</span>
+    </div>
+    <div class="spec-item">
+      <span class="label">Audio</span>
+      <span class="value"><a href="http://www.portaudio.com/">PortAudio</a> + <a href="https://existential.audio/blackhole/">BlackHole</a></span>
+    </div>
+    <div class="spec-item">
+      <span class="label">Languages</span>
+      <span class="value">100+ (auto-detected)</span>
+    </div>
+    <div class="spec-item">
+      <span class="label">License</span>
+      <span class="value">Open source</span>
+    </div>
+  </div>
+</section>
+
+<section class="final-cta">
+  <h2>Your conversations, your machine.</h2>
+  <p>Free, open source, and completely private.</p>
+  <div class="cta-group">
+    <a href="https://github.com/viktorminko/kian/releases/latest" class="btn btn-primary">Download Kian</a>
+    <a href="https://donate.stripe.com/REPLACE_WITH_YOUR_LINK" class="btn btn-donate">♥ Support Kian</a>
+  </div>
+</section>
+
+<footer>
+  <p> &middot; <a href="https://github.com/viktorminko/kian">GitHub</a></p>
+</footer>
+
+</body>
+</html>

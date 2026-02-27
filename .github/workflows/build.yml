@@ -1,0 +1,77 @@
+name: Build DMG
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "cmd/**"
+      - "internal/**"
+      - "scripts/package.sh"
+      - "Makefile"
+      - "go.mod"
+      - "go.sum"
+      - "icons/**"
+
+jobs:
+  build:
+    runs-on: macos-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+
+      - name: Install portaudio
+        run: |
+          brew install portaudio
+          mkdir -p third_party/portaudio_static
+          cp "$(brew --prefix portaudio)/lib/libportaudio.a" third_party/portaudio_static/
+
+      - name: Clone whisper.cpp
+        run: git clone --depth 1 https://github.com/ggerganov/whisper.cpp.git third_party/whisper.cpp
+
+      - name: Cache whisper.cpp build
+        id: cache-whisper
+        uses: actions/cache@v4
+        with:
+          path: third_party/whisper.cpp/build
+          key: whisper-static-build-${{ hashFiles('third_party/whisper.cpp/CMakeLists.txt') }}
+
+      - name: Build whisper.cpp
+        if: steps.cache-whisper.outputs.cache-hit != 'true'
+        run: |
+          cd third_party/whisper.cpp
+          cmake -B build -DGGML_METAL=ON -DBUILD_SHARED_LIBS=OFF -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0 -DCMAKE_INCLUDE_PATH="$(pwd)/ggml/include:$(pwd)/include"
+          cmake --build build --config Release -j "$(sysctl -n hw.ncpu)"
+
+      - name: Run tests
+        run: make test
+
+      - name: Build DMG
+        run: bash scripts/package.sh
+
+      - name: Determine version
+        id: version
+        run: |
+          git fetch --tags
+          LATEST=$(git tag -l 'v*' --sort=-v:refname | head -1)
+          if [ -z "$LATEST" ]; then
+            echo "tag=v0.1.0" >> "$GITHUB_OUTPUT"
+          else
+            MAJOR=$(echo "$LATEST" | cut -d. -f1)
+            MINOR=$(echo "$LATEST" | cut -d. -f2)
+            PATCH=$(echo "$LATEST" | cut -d. -f3)
+            echo "tag=${MAJOR}.${MINOR}.$((PATCH + 1))" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: Kian ${{ steps.version.outputs.tag }}
+          files: dist/Kian-Installer.dmg
+          generate_release_notes: true
