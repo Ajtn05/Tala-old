@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"runtime"
 	"sync"
 
@@ -93,14 +94,14 @@ func (a *App) handleStopClick() {
 }
 
 func showErrorDialog(err error) {
-	script := fmt.Sprintf(`display dialog "Recording stopped unexpectedly:\n\n%s" buttons {"OK"} default button "OK" with title "Kian Error" with icon stop`, err)
-	exec.Command("osascript", "-e", script).Start()
+	exec.Command("osascript",
+		"-e", fmt.Sprintf(`set msg to "Recording stopped unexpectedly:\n\n%s"`, strings.ReplaceAll(err.Error(), `"`, `\"`)),
+		"-e", `display dialog msg buttons {"OK"} default button "OK" with title "Kian Error" with icon stop`,
+	).Start()
 }
 
 func showAboutDialog() {
 	script := `set result to button returned of (display dialog "Kian — Audio Transcription
-
-
 
 https://getkian.app" buttons {"Website", "OK"} default button "OK" with title "About Kian" with icon note)
 if result is "Website" then
