@@ -21,14 +21,6 @@ else
     echo "portaudio already installed."
 fi
 
-if ! brew list blackhole-2ch &>/dev/null; then
-    echo ""
-    echo "WARNING: BlackHole 2ch is not installed."
-    echo "Install it with: brew install blackhole-2ch"
-    echo "Then configure Audio MIDI Setup (see README)."
-    echo ""
-fi
-
 # Copy portaudio static library (so the linker won't find the dylib)
 PORTAUDIO_STATIC_DIR="$ROOT_DIR/third_party/portaudio_static"
 mkdir -p "$PORTAUDIO_STATIC_DIR"

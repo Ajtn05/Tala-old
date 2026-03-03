@@ -2,7 +2,7 @@
 
 ## What this is
 
-macOS menu bar app for real-time audio transcription using whisper.cpp. Captures microphone and system audio (via BlackHole virtual audio driver), transcribes locally, writes timestamped text files to `~/Documents/Kian/`.
+macOS menu bar app for real-time audio transcription using whisper.cpp. Captures microphone and system audio (via CoreAudio process taps), transcribes locally, writes timestamped text files to `~/Documents/Kian/`.
 
 Tray-only app — no CLI mode, no terminal UI.
 
@@ -14,10 +14,14 @@ internal/
   config/config.go       Single source of truth for all defaults, labels, and tuning constants.
   audio/
     capture.go           PortAudio stream reading, silence detection, RMS-based speech detection, chunk splitting.
-    device.go            Device lookup: FindDeviceForMode() dispatches to aggregate/blackhole/mic helpers.
-    mode.go              AudioMode enum: ModeBoth (aggregate), ModeMicrophone, ModeSystemAudio.
+    device.go            Device lookup: FindDeviceForMode() dispatches to tap/mic helpers.
+    mode.go              AudioMode enum: ModeBoth, ModeMicrophone, ModeSystem.
+    tap.go               CoreAudio process tap creation/destruction via cgo.
+    tap_darwin.m          Objective-C implementation of CoreAudio tap functions.
+    tap_darwin.h          C header for tap functions (used by cgo).
+    setup.go             CoreAudio device enumeration, device UID lookup.
   pipeline/pipeline.go   Orchestrates capture → transcribe → write using errgroup goroutines.
-                         Extracted methods: captureAudio(), transcribeChunks() writeSegments() flushPending().
+                         Creates/destroys tap device for system audio modes.
   transcriber/
     transcriber.go       whisper.cpp Go bindings wrapper. 16kHz mono input required.
   ui/tray.go             systray menu bar app. Start/Stop recording, audio mode checkboxes, open output folder.
@@ -44,14 +48,19 @@ The Makefile sets `C_INCLUDE_PATH`, `LIBRARY_PATH`, `CGO_CFLAGS`, and `CGO_LDFLA
 
 ## Audio routing (macOS)
 
-System audio capture requires two virtual devices. The built-in setup wizard (`internal/ui/wizard.go`) creates these automatically via CoreAudio API:
-- **Kian Multi-Output**: routes audio to speakers/headphones AND BlackHole 2ch simultaneously
-- **Kian Aggregate**: combines BlackHole 2ch (system audio) + Built-in Microphone into one input
+System audio capture uses CoreAudio process taps (macOS 14.2+). No virtual audio drivers or manual setup needed.
+
+When recording starts with system audio enabled, the pipeline:
+1. Creates a process tap via `AudioHardwareCreateProcessTap()` — captures all system audio
+2. Wraps the tap in an aggregate device that PortAudio can read from
+3. For `ModeBoth`, includes the built-in microphone in the aggregate (3-channel: tap L, tap R, mic)
+4. Cycles PortAudio (`Terminate` + `Initialize`) so it discovers the new device
+5. On recording stop, destroys the aggregate device and process tap
 
 The app's `FindDeviceForMode()` selects the right device:
-- `ModeBoth` → Aggregate Device (3+ channels: BlackHole stereo + mic mono)
+- `ModeBoth` → "Kian Tap+Mic" aggregate (3 channels: tap stereo + mic mono)
 - `ModeMicrophone` → Built-in Microphone directly
-- `ModeSystemAudio` → BlackHole 2ch directly
+- `ModeSystem` → "Kian Tap" aggregate (2 channels: tap stereo)
 
 ## .app bundle structure
 
@@ -62,7 +71,7 @@ Kian.app/
     Resources/
       models/ggml-large-v3-turbo.bin        Whisper model (~1.5GB, downloaded by installer)
       AppIcon.icns                          App icon
-    Info.plist                              LSUIElement=true (menu bar only), mic usage description
+    Info.plist                              LSUIElement=true (menu bar only), mic + audio capture usage descriptions
 ```
 
 **Important**: Replacing the binary inside the .app revokes macOS microphone permissions silently. PortAudio reads succeed but return all zeros. The user must re-grant permission in System Settings → Privacy & Security → Microphone.
@@ -75,7 +84,8 @@ Kian.app/
 
 - **All-zero audio from PortAudio**: macOS microphone permission not granted for the process. When launched from terminal, the terminal app itself needs mic permission. When launched as .app via `open`, the app bundle needs it.
 - **Linker errors during `go build`**: Need `C_INCLUDE_PATH`, `LIBRARY_PATH`, `CGO_CFLAGS`, and `CGO_LDFLAGS` set. Use `make build` or source the env vars from the Makefile.
-- **Audio capture returns silence despite permission**: Check that Multi-Output Device is selected as system output (not MacBook Speakers directly). BlackHole only receives audio when the Multi-Output Device routes to it.
+- **CoreAudio tap errors**: Process taps require macOS 14.2+. The `CATapDescription` and `AudioHardwareCreateProcessTap` APIs are only available in Objective-C headers (`#ifdef __OBJC__`), which is why tap code uses separate `.m`/`.h` files instead of inline C in cgo.
+- **PortAudio doesn't see tap device**: PortAudio caches device list on `Initialize()`. After creating a tap, must call `Terminate()` + `Initialize()` before `FindDeviceForMode()`.
 
 ## Code style
 

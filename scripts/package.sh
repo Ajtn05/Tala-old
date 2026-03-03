@@ -6,7 +6,7 @@ WHISPER_DIR="$ROOT_DIR/third_party/whisper.cpp"
 DIST_DIR="$ROOT_DIR/dist"
 APP_DIR="$DIST_DIR/Kian.app"
 
-export MACOSX_DEPLOYMENT_TARGET="13.0"
+export MACOSX_DEPLOYMENT_TARGET="14.2"
 export C_INCLUDE_PATH="$WHISPER_DIR/include:$WHISPER_DIR/ggml/include"
 export LIBRARY_PATH="$WHISPER_DIR/build/src:$WHISPER_DIR/build/ggml/src:$WHISPER_DIR/build/ggml/src/ggml-metal:$WHISPER_DIR/build/ggml/src/ggml-blas"
 export CGO_CFLAGS="-I$(brew --prefix portaudio)/include"
@@ -49,11 +49,13 @@ cat > "$APP_DIR/Contents/Info.plist" << 'PLIST'
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>LSMinimumSystemVersion</key>
-    <string>13.0</string>
+    <string>14.2</string>
     <key>LSUIElement</key>
     <true/>
     <key>NSMicrophoneUsageDescription</key>
     <string>Kian needs microphone access to transcribe audio from your meetings and conversations.</string>
+    <key>NSAudioCaptureUsageDescription</key>
+    <string>Kian needs audio capture access to transcribe system audio from your meetings and conversations.</string>
     <key>CFBundleIconFile</key>
     <string>AppIcon</string>
     <key>NSHighResolutionCapable</key>
@@ -119,23 +121,6 @@ echo ""
 echo "=== Kian Installer ==="
 echo ""
 
-# --- Homebrew ---
-if ! command -v brew &>/dev/null; then
-    if [ -f /opt/homebrew/bin/brew ]; then
-        eval "$(/opt/homebrew/bin/brew shellenv)"
-    else
-        echo "Homebrew not found. Installing..."
-        /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-        eval "$(/opt/homebrew/bin/brew shellenv)"
-    fi
-fi
-
-# --- BlackHole ---
-if ! brew list blackhole-2ch &>/dev/null; then
-    echo "Installing blackhole-2ch..."
-    brew install blackhole-2ch
-fi
-
 # --- Extract app (preserve model across updates) ---
 SAVED_MODEL=""
 if [ -f "$MODEL_DIR/$MODEL_NAME" ]; then
@@ -173,6 +158,7 @@ if [ ! -f "$MODEL_DIR/$MODEL_NAME" ]; then
 fi
 
 echo ""
+
 echo "Installation complete! Launching Kian..."
 echo ""
 

@@ -277,6 +277,106 @@
       font-size: 0.9rem;
     }
 
+    /* Installation */
+    .installation {
+      padding: 6rem 2rem;
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+    .installation h2 {
+      font-size: 2.2rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      margin-bottom: 3.5rem;
+    }
+    .install-steps {
+      display: flex;
+      flex-direction: column;
+      gap: 2rem;
+    }
+    .install-step {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 2rem;
+      transition: border-color 0.2s;
+    }
+    .install-step:hover { border-color: #333; }
+    .install-step-header {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      margin-bottom: 1rem;
+    }
+    .install-step-num {
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      background: var(--accent-glow);
+      border: 1px solid rgba(228, 68, 68, 0.2);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.85rem;
+      font-weight: 700;
+      color: var(--accent);
+      flex-shrink: 0;
+    }
+    .install-step h3 {
+      font-size: 1.1rem;
+      font-weight: 600;
+    }
+    .install-step p {
+      color: var(--text-muted);
+      font-size: 0.95rem;
+      line-height: 1.7;
+      margin-bottom: 0.5rem;
+    }
+    .install-step p:last-child { margin-bottom: 0; }
+    .install-note {
+      margin-top: 1.2rem;
+      padding: 1rem 1.2rem;
+      background: rgba(228, 68, 68, 0.06);
+      border: 1px solid rgba(228, 68, 68, 0.15);
+      border-radius: 10px;
+      font-size: 0.9rem;
+      color: var(--text-muted);
+      line-height: 1.6;
+    }
+    .install-note strong { color: var(--text); }
+    .install-options {
+      margin-top: 1rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.8rem;
+    }
+    .install-option {
+      padding: 1rem 1.2rem;
+      background: rgba(255,255,255,0.02);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+    }
+    .install-option h4 {
+      font-size: 0.95rem;
+      font-weight: 600;
+      margin-bottom: 0.4rem;
+    }
+    .install-option p {
+      font-size: 0.9rem;
+      margin-bottom: 0;
+    }
+    .install-code {
+      margin-top: 0.5rem;
+      padding: 0.6rem 1rem;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font-family: 'SF Mono', 'Menlo', monospace;
+      font-size: 0.82rem;
+      color: var(--text);
+      overflow-x: auto;
+    }
+
     /* Specs */
     .specs {
       padding: 6rem 2rem;
@@ -378,6 +478,7 @@
     <a href="#features">Features</a>
     <a href="#use-cases">Use cases</a>
     <a href="#how-it-works">How it works</a>
+    <a href="#installation">Install</a>
     <a href="https://donate.stripe.com/REPLACE_WITH_YOUR_LINK" class="btn btn-donate" style="padding: 0.5rem 1.2rem; font-size: 0.85rem;">♥ Donate</a>
     <a href="https://github.com/viktorminko/kian" class="btn btn-secondary" style="padding: 0.5rem 1.2rem; font-size: 0.85rem;">GitHub</a>
   </div>
@@ -424,8 +525,8 @@
 
     <div class="feature-card">
       <div class="feature-icon">🔧</div>
-      <h3>Guided setup</h3>
-      <p>Built-in wizard automatically creates the virtual audio devices (via <a href="https://existential.audio/blackhole/">BlackHole</a>) needed for system audio capture.</p>
+      <h3>Zero setup</h3>
+      <p>No drivers, no virtual audio devices, no reboot. Uses macOS CoreAudio process taps to capture system audio directly. Just install and record.</p>
     </div>
 
     <div class="feature-card">
@@ -500,12 +601,12 @@
     <div class="step">
       <div class="step-number">01</div>
       <h3>Install</h3>
-      <p>Download the DMG, run the installer. It installs dependencies and downloads the Whisper model automatically.</p>
+      <p>Download the DMG, run the installer. It copies the app and downloads the Whisper model automatically.</p>
     </div>
     <div class="step">
       <div class="step-number">02</div>
-      <h3>Set up audio</h3>
-      <p>Click "Setup Audio Devices" in the menu bar. The wizard creates virtual audio devices automatically.</p>
+      <h3>Grant permissions</h3>
+      <p>Allow microphone access on first launch. System audio capture permission is requested when needed.</p>
     </div>
     <div class="step">
       <div class="step-number">03</div>
@@ -517,6 +618,69 @@
       <h3>Review</h3>
       <p>Open the output folder from the menu. Your transcripts are organized by date with full timestamps.</p>
     </div>
+  </div>
+</section>
+
+<section class="installation" id="installation">
+  <div class="section-label">Installation</div>
+  <h2>Step-by-step setup.</h2>
+  <div class="install-steps">
+
+    <div class="install-step">
+      <div class="install-step-header">
+        <div class="install-step-num">1</div>
+        <h3>Download the installer</h3>
+      </div>
+      <p>Download the latest <strong>Kian-Installer.dmg</strong> from the <a href="https://github.com/viktorminko/kian/releases/latest">releases page</a>. Double-click to mount it.</p>
+      <div class="install-note"><strong>Is this safe?</strong> The DMG is built from the open-source code on <a href="https://github.com/viktorminko/kian">GitHub</a> by GitHub Actions CI. You can verify the build by checking the <a href="https://github.com/viktorminko/kian/actions">workflow runs</a> or build it yourself from source.</div>
+    </div>
+
+    <div class="install-step">
+      <div class="install-step-header">
+        <div class="install-step-num">2</div>
+        <h3>Run the installer</h3>
+      </div>
+      <p>Kian is not signed with an Apple Developer certificate, so macOS Gatekeeper will block it by default. This is normal for open-source apps distributed outside the Mac App Store. Use one of these methods to open it:</p>
+      <div class="install-options">
+        <div class="install-option">
+          <h4>Option A — Right-click to open (recommended)</h4>
+          <p>Right-click (or Control-click) <strong>Install Kian</strong>, select <strong>Open</strong>, then click <strong>Open</strong> in the dialog. This is the standard macOS way to open apps from unidentified developers. It only bypasses Gatekeeper for this specific app — your system security settings remain unchanged.</p>
+        </div>
+        <div class="install-option">
+          <h4>Option B — Allow in System Settings</h4>
+          <p>Double-click <strong>Install Kian</strong> (it will be blocked). Then go to <strong>System Settings &rarr; Privacy &amp; Security</strong>, scroll to the Security section, and click <strong>Open Anyway</strong>. This is equivalent to Option A — it creates a one-time exception for this app only.</p>
+        </div>
+        <div class="install-option">
+          <h4>Option C — Terminal</h4>
+          <p>Remove the quarantine attribute, then double-click normally. This removes the "downloaded from the internet" flag that triggers Gatekeeper. It does not disable any system-wide security.</p>
+          <div class="install-code">xattr -d com.apple.quarantine "/Volumes/Kian Installer/Install Kian.app"</div>
+        </div>
+      </div>
+      <div class="install-note"><strong>Why does this happen?</strong> macOS Gatekeeper blocks apps that aren't signed with an Apple Developer certificate ($99/year). Kian is free and open source, so it's distributed unsigned. None of these methods weaken your Mac's security — they only allow this specific app to run.</div>
+    </div>
+
+    <div class="install-step">
+      <div class="install-step-header">
+        <div class="install-step-num">3</div>
+        <h3>Follow the installer</h3>
+      </div>
+      <p>A Terminal window will open. The installer automatically:</p>
+      <p>&#8226; Copies <strong>Kian.app</strong> to ~/Applications/</p>
+      <p>&#8226; Downloads the Whisper model (~1.5 GB) from <a href="https://huggingface.co/ggerganov/whisper.cpp">Hugging Face</a> on first install</p>
+      <p>&#8226; Launches Kian when done</p>
+      <div class="install-note"><strong>What gets installed?</strong> Kian.app is fully self-contained. The only file placed outside ~/Applications/ is the Whisper model bundled inside the app. Nothing runs in the background when Kian is not open. You can review the full <a href="https://github.com/viktorminko/kian/blob/main/scripts/package.sh">installer script</a> on GitHub.</div>
+    </div>
+
+    <div class="install-step">
+      <div class="install-step-header">
+        <div class="install-step-num">4</div>
+        <h3>Grant permissions</h3>
+      </div>
+      <p>On first launch, macOS will ask for <strong>microphone access</strong>. Click <strong>Allow</strong>. When you start recording with System Audio enabled, macOS will also ask for <strong>audio capture</strong> access. Click <strong>Allow</strong>.</p>
+      <p>Audio is processed locally by whisper.cpp — nothing is sent over the network.</p>
+      <div class="install-note">If you accidentally denied either permission, go to <strong>System Settings &rarr; Privacy &amp; Security &rarr; Microphone</strong> (or <strong>Audio Capture</strong>) and enable Kian. You'll see a purple indicator dot in the menu bar while system audio is being captured — this is normal macOS behavior.</div>
+    </div>
+
   </div>
 </section>
 
@@ -534,11 +698,11 @@
     </div>
     <div class="spec-item">
       <span class="label">Platform</span>
-      <span class="value">macOS (Apple Silicon + Intel)</span>
+      <span class="value">macOS 14.2+ (Apple Silicon + Intel)</span>
     </div>
     <div class="spec-item">
       <span class="label">Audio</span>
-      <span class="value"><a href="http://www.portaudio.com/">PortAudio</a> + <a href="https://existential.audio/blackhole/">BlackHole</a></span>
+      <span class="value"><a href="http://www.portaudio.com/">PortAudio</a> + CoreAudio Taps</span>
     </div>
     <div class="spec-item">
       <span class="label">Languages</span>

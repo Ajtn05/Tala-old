@@ -1,7 +1,7 @@
 WHISPER_DIR := third_party/whisper.cpp
 ROOT_DIR := $(shell pwd)
 
-export MACOSX_DEPLOYMENT_TARGET := 13.0
+export MACOSX_DEPLOYMENT_TARGET := 14.2
 export C_INCLUDE_PATH := $(ROOT_DIR)/$(WHISPER_DIR)/include:$(ROOT_DIR)/$(WHISPER_DIR)/ggml/include
 export LIBRARY_PATH := $(ROOT_DIR)/$(WHISPER_DIR)/build/src:$(ROOT_DIR)/$(WHISPER_DIR)/build/ggml/src:$(ROOT_DIR)/$(WHISPER_DIR)/build/ggml/src/ggml-metal:$(ROOT_DIR)/$(WHISPER_DIR)/build/ggml/src/ggml-blas
 

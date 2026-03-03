@@ -2,16 +2,15 @@ package ui
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"os"
-	"fmt"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"sync"
 
 	"github.com/energye/systray"
-	"github.com/gordonklaus/portaudio"
 
 	"kian/internal/audio"
 	"kian/internal/config"
@@ -32,8 +31,6 @@ type App struct {
 	mOpenFolder *systray.MenuItem
 	mMic        *systray.MenuItem
 	mSystem     *systray.MenuItem
-	mSetup      *systray.MenuItem
-	mAudioMIDI  *systray.MenuItem
 }
 
 func NewApp(cfg pipeline.Config) *App {
@@ -61,21 +58,13 @@ func (a *App) onReady() {
 	a.mMic = systray.AddMenuItemCheckbox("Microphone", "Capture from microphone", true)
 	a.mMic.Click(func() { a.toggleAudioSource(a.mMic) })
 
-	a.mSystem = systray.AddMenuItemCheckbox("System Audio", "Capture system audio via BlackHole", true)
+	a.mSystem = systray.AddMenuItemCheckbox("System Audio", "Capture system audio", true)
 	a.mSystem.Click(func() { a.toggleAudioSource(a.mSystem) })
 
 	systray.AddSeparator()
 
 	a.mOpenFolder = systray.AddMenuItem("Open Output Folder", "Open the transcript output directory")
 	a.mOpenFolder.Click(func() { a.openOutputFolder() })
-
-	a.mSetup = systray.AddMenuItem("Setup Audio Devices...", "Configure virtual audio devices for system audio capture")
-	a.mSetup.Click(func() {
-		go a.runSetupAndRefresh()
-	})
-
-	a.mAudioMIDI = systray.AddMenuItem("Audio MIDI Setup", "Open Audio MIDI Setup to configure devices")
-	a.mAudioMIDI.Click(func() { exec.Command("open", "-a", "Audio MIDI Setup").Start() })
 
 	systray.AddSeparator()
 
@@ -89,50 +78,6 @@ func (a *App) onReady() {
 		a.stop()
 		systray.Quit()
 	})
-
-	if !audioDevicesReady() {
-		a.disableForSetup()
-	}
-}
-
-// audioDevicesReady returns true if the required audio devices are present.
-func audioDevicesReady() bool {
-	status := audio.CheckDevices()
-	return status.AggregateFound && status.MultiOutputFound && status.BlackHoleFound
-}
-
-// disableForSetup disables all menu items except Setup and Quit.
-func (a *App) disableForSetup() {
-	a.mStart.Disable()
-	a.mStop.Disable()
-	a.mMic.Disable()
-	a.mSystem.Disable()
-	a.mOpenFolder.Disable()
-	systray.SetTooltip("Kian — audio setup required")
-}
-
-// enableAfterSetup re-enables menu items after successful setup.
-func (a *App) enableAfterSetup() {
-	a.mStart.Enable()
-	a.mMic.Enable()
-	a.mSystem.Enable()
-	a.mOpenFolder.Enable()
-	systray.SetTooltip("Kian")
-}
-
-// runSetupAndRefresh runs the wizard, re-initializes PortAudio so it
-// picks up newly created devices, and enables the menu on success.
-func (a *App) runSetupAndRefresh() {
-	RunSetupWizard()
-	if err := portaudio.Terminate(); err != nil {
-		log.Printf("terminate portaudio: %v", err)
-	}
-	if err := portaudio.Initialize(); err != nil {
-		log.Printf("re-initialize portaudio: %v", err)
-	}
-	if audioDevicesReady() {
-		a.enableAfterSetup()
-	}
 }
 
 func (a *App) handleStopClick() {

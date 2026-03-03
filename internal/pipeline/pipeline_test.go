@@ -8,39 +8,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"kian/internal/audio"
 	"kian/internal/config"
 )
-
-func TestSourceLabelForMode(t *testing.T) {
-	tests := []struct {
-		name string
-		mode audio.Mode
-		want string
-	}{
-		{
-			name: "microphone",
-			mode: audio.ModeMicrophone,
-			want: config.LabelMicrophone,
-		},
-		{
-			name: "system audio",
-			mode: audio.ModeSystem,
-			want: config.LabelSystemAudio,
-		},
-		{
-			name: "both returns empty",
-			mode: audio.ModeBoth,
-			want: "",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, sourceLabelForMode(tt.mode))
-		})
-	}
-}
 
 func TestFormatDuration(t *testing.T) {
 	tests := []struct {
