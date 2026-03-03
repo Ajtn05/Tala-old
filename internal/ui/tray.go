@@ -132,7 +132,9 @@ func (a *App) start() {
 	a.mu.Unlock()
 
 	cfg := a.cfg
+	a.mu.Lock()
 	cfg.AudioMode = a.audioMode
+	a.mu.Unlock()
 	cfg.OnSegment = a.onSegment
 
 	go func() {
@@ -193,6 +195,7 @@ func (a *App) toggleAudioSource(clicked *systray.MenuItem) {
 		return
 	}
 
+	a.mu.Lock()
 	switch {
 	case mic && sys:
 		a.audioMode = audio.ModeBoth
@@ -201,6 +204,7 @@ func (a *App) toggleAudioSource(clicked *systray.MenuItem) {
 	default:
 		a.audioMode = audio.ModeSystem
 	}
+	a.mu.Unlock()
 
 	a.syncCheckmarks()
 }

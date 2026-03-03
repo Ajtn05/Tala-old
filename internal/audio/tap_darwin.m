@@ -5,6 +5,7 @@
 #import <Foundation/Foundation.h>
 #include "tap_darwin.h"
 #include <string.h>
+#include <stdatomic.h>
 
 OSStatus createGlobalTap(AudioObjectID *outTapID) {
 	@autoreleasepool {
@@ -83,13 +84,11 @@ OSStatus createTapAggregate(
 	return status;
 }
 
-// Ring buffer for tap audio data.
-// The IO proc writes here, Go reads via readTapSamples.
 #define TAP_RING_SIZE (48000 * 2 * 10) // 10 sec at 48kHz stereo
 static float tapRing[TAP_RING_SIZE];
-static volatile int tapWritePos = 0;
-static volatile int tapReadPos = 0;
-static volatile int tapChannels = 0;
+static _Atomic uint64_t tapWritePos = 0;
+static _Atomic uint64_t tapReadPos = 0;
+static _Atomic int tapChannels = 0;
 static AudioDeviceIOProcID tapIOProcID = NULL;
 
 OSStatus startTapIO(AudioDeviceID aggID) {
@@ -108,11 +107,11 @@ OSStatus startTapIO(AudioDeviceID aggID) {
 			ch += (int)abl->mBuffers[b].mNumberChannels;
 	}
 	free(abl);
-	tapChannels = ch;
+	atomic_store_explicit(&tapChannels, ch, memory_order_release);
 
 	// Reset ring buffer.
-	tapWritePos = 0;
-	tapReadPos = 0;
+	atomic_store_explicit(&tapWritePos, 0, memory_order_relaxed);
+	atomic_store_explicit(&tapReadPos, 0, memory_order_relaxed);
 
 	OSStatus status = AudioDeviceCreateIOProcIDWithBlock(
 		&tapIOProcID, aggID, NULL,
@@ -122,14 +121,21 @@ OSStatus startTapIO(AudioDeviceID aggID) {
 		  AudioBufferList *outOutputData,
 		  const AudioTimeStamp *inOutputTime) {
 			if (!inInputData) return;
+			uint64_t wp = atomic_load_explicit(&tapWritePos, memory_order_relaxed);
+			uint64_t rp = atomic_load_explicit(&tapReadPos, memory_order_acquire);
 			for (UInt32 b = 0; b < inInputData->mNumberBuffers; b++) {
 				float *samples = (float *)inInputData->mBuffers[b].mData;
 				int numSamples = inInputData->mBuffers[b].mDataByteSize / sizeof(float);
 				for (int i = 0; i < numSamples; i++) {
-					tapRing[tapWritePos % TAP_RING_SIZE] = samples[i];
-					tapWritePos++;
+					if (wp - rp >= TAP_RING_SIZE) {
+						rp = wp - TAP_RING_SIZE + 1;
+						atomic_store_explicit(&tapReadPos, rp, memory_order_relaxed);
+					}
+					tapRing[wp % TAP_RING_SIZE] = samples[i];
+					wp++;
 				}
 			}
+			atomic_store_explicit(&tapWritePos, wp, memory_order_release);
 		});
 	if (status != noErr) return status;
 
@@ -137,19 +143,22 @@ OSStatus startTapIO(AudioDeviceID aggID) {
 }
 
 int readTapSamples(float *buf, int maxSamples) {
-	int available = tapWritePos - tapReadPos;
+	uint64_t wp = atomic_load_explicit(&tapWritePos, memory_order_acquire);
+	uint64_t rp = atomic_load_explicit(&tapReadPos, memory_order_relaxed);
+	int available = (int)(wp - rp);
 	if (available <= 0) return 0;
 	if (available > maxSamples) available = maxSamples;
 
 	for (int i = 0; i < available; i++) {
-		buf[i] = tapRing[tapReadPos % TAP_RING_SIZE];
-		tapReadPos++;
+		buf[i] = tapRing[rp % TAP_RING_SIZE];
+		rp++;
 	}
+	atomic_store_explicit(&tapReadPos, rp, memory_order_release);
 	return available;
 }
 
 int getTapChannels(void) {
-	return tapChannels;
+	return atomic_load_explicit(&tapChannels, memory_order_acquire);
 }
 
 OSStatus stopTapIO(AudioDeviceID aggID) {
