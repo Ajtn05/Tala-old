@@ -1,8 +1,17 @@
 # Kian
 
-A macOS menu bar app that transcribes audio in real time. It captures both your microphone and system audio (e.g. Google Meet, YouTube, Zoom) and writes timestamped transcripts to text files.
+Real-time audio transcription for macOS. Captures your microphone, system audio (Google Meet, Zoom, YouTube), or both — and writes timestamped transcripts to text files.
 
-Built with [whisper.cpp](https://github.com/ggerganov/whisper.cpp) for fast, local transcription — nothing is sent to the cloud.
+Built with [whisper.cpp](https://github.com/ggerganov/whisper.cpp) for fast, local transcription. Nothing leaves your machine.
+
+## Features
+
+- **Three capture modes** — Microphone only, System Audio only, or both simultaneously
+- **100% local** — all processing happens on-device using whisper.cpp with Metal acceleration
+- **No drivers needed** — system audio capture uses CoreAudio process taps (macOS 14.2+)
+- **Menu bar app** — lives in your menu bar, no dock icon, no window clutter
+- **Timestamped output** — each line is labeled with source and time range
+- **Auto echo suppression** — in "Both" mode, mic echo is suppressed when system audio is active
 
 ## How it works
 
@@ -12,7 +21,7 @@ Built with [whisper.cpp](https://github.com/ggerganov/whisper.cpp) for fast, loc
 4. Speak or play audio — Kian transcribes in real time
 5. Click **Stop Recording** — the transcript is saved to `~/Documents/Kian/`
 
-Each transcript line is labeled with the source (`[Microphone]` or `[System Audio]`) and a timestamp.
+Each transcript line is labeled with the source (`[Microphone]` or `[System Audio]`) and a time range.
 
 ## Prerequisites
 
