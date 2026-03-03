@@ -16,56 +16,86 @@ Each transcript line is labeled with the source (`[Microphone]` or `[System Audi
 
 ## Prerequisites
 
-- macOS 13.0+
-- [Homebrew](https://brew.sh)
+- macOS 14.2+ (Sonoma or later)
 
-The installer handles the rest automatically, but under the hood Kian needs:
-
-- **PortAudio** — audio capture library
-- **BlackHole 2ch** — virtual audio driver that routes system audio to Kian
-- **whisper.cpp model** (~1.5 GB, downloaded on first install)
+That's it. No additional drivers or dependencies needed. The installer handles everything automatically.
 
 ## Installation
 
-1. Download the latest `Kian-Installer.dmg` from [Releases](../../releases)
-2. Open the DMG, right-click **Install Kian** and select **Open**
-3. Follow the Terminal prompts — it will install BlackHole and download the Whisper model (~1.5 GB)
-4. On first launch, click **Setup Audio Devices...** in the menu bar to complete audio setup
+### Step 1: Download
 
-## Audio setup
+Download the latest `Kian-Installer.dmg` from [Releases](../../releases).
 
-To capture system audio, macOS needs two virtual audio devices (Multi-Output and Aggregate). Kian's built-in setup wizard creates these automatically — just click **Setup Audio Devices...** from the menu bar.
+> **Is this safe?** The DMG is built from the open-source code on [GitHub](https://github.com/viktorminko/kian) by GitHub Actions CI. You can verify the build by checking the [workflow runs](https://github.com/viktorminko/kian/actions) or build it yourself from source.
 
-After the wizard finishes, you need to do one manual step:
+### Step 2: Open the DMG
 
-1. Go to **System Settings → Sound → Output**
-2. Select **Kian Multi-Output**
+Double-click `Kian-Installer.dmg` to mount it. You'll see **Install Kian** inside.
 
-You'll still hear audio through your speakers/headphones, and Kian will capture it via BlackHole.
+### Step 3: Run the installer
 
-> **Tip:** If you switch between speakers and headphones, recreate the Multi-Output Device by running the setup wizard again.
+The app is not signed with an Apple Developer certificate, so macOS Gatekeeper will block it by default. This is normal for open-source apps distributed outside the Mac App Store. You need to explicitly allow it.
 
-<details>
-<summary>Manual setup (if you prefer)</summary>
+**Option A — Right-click to open (recommended):**
 
-### 1. Create a Multi-Output Device
+1. Right-click (or Control-click) **Install Kian**
+2. Select **Open** from the context menu
+3. A dialog will say the app is from an unidentified developer — click **Open**
 
-- Open **Audio MIDI Setup** (Spotlight → "Audio MIDI Setup")
-- Click **+** at the bottom-left → **Create Multi-Output Device**
-- Check **your output device** (e.g. MacBook Air Speakers or your headphones) **+ BlackHole 2ch**
+This is the standard macOS way to open apps from unidentified developers. It only bypasses Gatekeeper for this specific app — your system security settings remain unchanged.
 
-### 2. Create an Aggregate Device
+**Option B — Allow in System Settings:**
 
-- Click **+** → **Create Aggregate Device**
-- Check **BlackHole 2ch + Built-in Microphone**
-- Set **Clock Source** to **BlackHole 2ch**
+1. Double-click **Install Kian** — macOS will block it
+2. Go to **System Settings → Privacy & Security**
+3. Scroll down to the Security section — you'll see a message about "Install Kian" being blocked
+4. Click **Open Anyway**
+5. Enter your password if prompted
+6. Click **Open** in the confirmation dialog
 
-### 3. Select Multi-Output Device as system output
+This is equivalent to Option A — it creates a one-time exception for this app only.
 
-- Go to **System Settings → Sound → Output**
-- Select **Multi-Output Device**
+**Option C — Remove quarantine via Terminal:**
 
-</details>
+```bash
+xattr -d com.apple.quarantine "/Volumes/Kian Installer/Install Kian.app"
+```
+
+This removes the "downloaded from the internet" flag that triggers Gatekeeper. It does not disable any system-wide security. Then double-click **Install Kian** normally.
+
+> **Why does macOS block it?** Gatekeeper blocks apps that aren't signed with an Apple Developer certificate ($99/year). Kian is free and open source, so it's distributed unsigned. None of these methods weaken your Mac's security — they only allow this specific app to run.
+
+### Step 4: Follow the installer
+
+A Terminal window will open and the installer will:
+
+1. Copy **Kian.app** to `~/Applications/`
+2. Download the Whisper model (~1.5 GB) from [Hugging Face](https://huggingface.co/ggerganov/whisper.cpp) on first install
+3. Launch Kian automatically when done
+
+> **What gets installed?** Kian.app is fully self-contained. The only file placed outside `~/Applications/` is the Whisper model bundled inside the app. Nothing runs in the background when Kian is not open. You can review the full [installer script](https://github.com/viktorminko/kian/blob/main/scripts/package.sh) on GitHub.
+
+### Step 5: Grant permissions
+
+On first launch, macOS will ask for **microphone access**. Click **Allow**. When you start recording with System Audio enabled, macOS will also ask for **audio capture** access. Click **Allow**.
+
+Audio is processed locally by whisper.cpp — nothing is sent over the network.
+
+If you accidentally denied either permission, go to **System Settings → Privacy & Security → Microphone** (or **Audio Capture**) and enable Kian.
+
+### Updating
+
+Run the installer again. It preserves the downloaded Whisper model (~1.5 GB) so you don't have to re-download it.
+
+### Uninstalling
+
+Delete `~/Applications/Kian.app`. That's it — no drivers or system modifications to clean up.
+
+## How system audio capture works
+
+Kian uses the CoreAudio process tap API (macOS 14.2+) to capture system audio directly — no virtual audio drivers needed. When you start recording with System Audio enabled, Kian creates a temporary audio tap that captures all system audio output. The tap is automatically destroyed when you stop recording.
+
+You'll see a purple indicator dot in the menu bar while system audio is being captured. This is macOS indicating that an app is using audio capture.
 
 ## Development
 
@@ -87,7 +117,7 @@ bash scripts/package.sh
 ```
 cmd/kian/          Entry point
 internal/
-  audio/           Audio capture, device selection, silence detection
+  audio/           Audio capture, device selection, CoreAudio tap management
   config/          App-wide defaults and constants
   pipeline/        Capture → transcribe → write pipeline
   transcriber/     whisper.cpp Go bindings wrapper

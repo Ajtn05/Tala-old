@@ -6,12 +6,35 @@ import (
 	"log"
 	"math"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/gordonklaus/portaudio"
 
 	"kian/internal/config"
 )
+
+// TapActive tracks whether the system audio tap is currently producing
+// sound. The tap capturer marks it active on each above-threshold buffer;
+// the mic capturer checks whether the tap was recently active to suppress
+// echo. Uses a monotonic nanosecond timestamp for lock-free sharing.
+type TapActive struct {
+	lastActiveNano atomic.Int64
+}
+
+// MarkActive records that the tap is producing audio right now.
+func (t *TapActive) MarkActive() {
+	t.lastActiveNano.Store(time.Now().UnixNano())
+}
+
+// IsActive returns true if the tap produced audio within the given window.
+func (t *TapActive) IsActive(window time.Duration) bool {
+	last := t.lastActiveNano.Load()
+	if last == 0 {
+		return false
+	}
+	return time.Since(time.Unix(0, last)) < window
+}
 
 // TargetSampleRate is the sample rate required by whisper.cpp. This is not
 // configurable — the model always expects 16 kHz input.
@@ -28,12 +51,11 @@ type CaptureConfig struct {
 	SampleRate  float64
 	SourceLabel string
 
-	FramesPerBuffer    int
-	SilenceThreshold   float64
-	SilenceDuration    float64
-	MaxChunkDuration   float64
-	DominanceRatio     float64
-	CrosstalkThreshold float64
+	FramesPerBuffer  int
+	SilenceThreshold float64
+	SilenceDuration  float64
+	MaxChunkDuration float64
+	TapActive        *TapActive
 }
 
 func (c CaptureConfig) framesPerBuffer() int {
@@ -64,37 +86,21 @@ func (c CaptureConfig) maxChunkDuration() float64 {
 	return config.DefaultMaxChunkDuration
 }
 
-func (c CaptureConfig) dominanceRatio() float64 {
-	if c.DominanceRatio > 0 {
-		return c.DominanceRatio
-	}
-	return config.DefaultDominanceRatio
-}
-
-func (c CaptureConfig) crosstalkThreshold() float64 {
-	if c.CrosstalkThreshold > 0 {
-		return c.CrosstalkThreshold
-	}
-	return config.DefaultCrosstalkThreshold
-}
-
 type capturer struct {
 	out chan<- Chunk
 
 	sampleRate  float64
 	fpb         int
 	numChannels int
-	aggregate   bool
 
 	needResample bool
 	ratio        float64
 
-	silThresh      float64
-	silenceFrames  int
-	maxFrames      int
-	domRatio       float64
-	crosstalkThresh float64
-	sourceLabel    string
+	silThresh     float64
+	silenceFrames int
+	maxFrames     int
+	sourceLabel   string
+	tapActive     *TapActive
 
 	accumulator   []float32
 	silentCount   int
@@ -127,15 +133,13 @@ func Capture(ctx context.Context, cfg CaptureConfig, out chan<- Chunk) error {
 		sampleRate:    sampleRate,
 		fpb:           fpb,
 		numChannels:   cfg.Device.MaxInputChannels,
-		aggregate:     cfg.Device.MaxInputChannels > 2,
 		needResample:  math.Abs(sampleRate-TargetSampleRate) > 1.0,
 		ratio:         TargetSampleRate / sampleRate,
-		silThresh:       cfg.silenceThreshold(),
-		silenceFrames:   int(sampleRate * cfg.silenceDuration()),
-		maxFrames:       int(sampleRate * cfg.maxChunkDuration()),
-		domRatio:        cfg.dominanceRatio(),
-		crosstalkThresh: cfg.crosstalkThreshold(),
-		sourceLabel:     cfg.SourceLabel,
+		silThresh:     cfg.silenceThreshold(),
+		silenceFrames: int(sampleRate * cfg.silenceDuration()),
+		maxFrames:     int(sampleRate * cfg.maxChunkDuration()),
+		sourceLabel:   cfg.SourceLabel,
+		tapActive:     cfg.TapActive,
 		accumulator:   make([]float32, 0, int(sampleRate*5)*cfg.Device.MaxInputChannels),
 	}
 
@@ -183,7 +187,8 @@ func (c *capturer) readLoop(ctx context.Context, stream *portaudio.Stream, buf [
 }
 
 func (c *capturer) processBuffer(buf []float32) {
-	hasSpeechInBuf := hasSourceSpeech(buf, c.numChannels, c.aggregate, c.silThresh)
+	suppressed := c.tapActive != nil && c.tapActive.IsActive(300*time.Millisecond)
+	hasSpeechInBuf := !suppressed && rms(buf) >= c.silThresh
 	c.elapsedFrames += c.fpb
 
 	if hasSpeechInBuf {
@@ -193,13 +198,13 @@ func (c *capturer) processBuffer(buf []float32) {
 		c.silentCount += c.fpb
 	}
 
-	if c.hasSpeech {
-		c.accumulator = append(c.accumulator, buf...)
-		c.totalFrames += c.fpb
-	}
-
 	if !c.hasSpeech {
 		return
+	}
+
+	if !suppressed {
+		c.accumulator = append(c.accumulator, buf...)
+		c.totalFrames += c.fpb
 	}
 
 	if c.silentCount < c.silenceFrames && c.totalFrames < c.maxFrames {
@@ -217,37 +222,27 @@ func (c *capturer) flushRemaining() {
 	if !c.hasSpeech {
 		return
 	}
-	c.emitChunks(c.accumulator, c.startTime())
+	c.emit(c.accumulator, c.startTime())
 }
 
 func (c *capturer) flushAccumulator() {
-	c.emitChunks(c.accumulator, c.startTime())
+	c.emit(c.accumulator, c.startTime())
 	c.accumulator = c.accumulator[:0]
 	c.silentCount = 0
 	c.totalFrames = 0
 	c.hasSpeech = false
 }
 
-func (c *capturer) isSilent(samples []float32) bool {
-	return rms(samples) < c.silThresh
-}
-
-func (c *capturer) emitChunks(interleaved []float32, startOffset time.Duration) {
-	if !c.aggregate {
-		c.emitMono(interleaved, startOffset)
-		return
-	}
-	c.emitStereo(interleaved, startOffset)
-}
-
-func (c *capturer) emitMono(interleaved []float32, startOffset time.Duration) {
+func (c *capturer) emit(interleaved []float32, startOffset time.Duration) {
+	// mixToMono averages all channels into one — whisper requires mono input.
 	mono := mixToMono(interleaved, c.numChannels)
 	if c.needResample {
 		mono = resample(mono, c.ratio)
 	}
-	if c.isSilent(mono) {
+	if rms(mono) < c.silThresh {
 		return
 	}
+
 	label := c.sourceLabel
 	if label == "" {
 		label = config.LabelUnknown
@@ -255,176 +250,6 @@ func (c *capturer) emitMono(interleaved []float32, startOffset time.Duration) {
 	c.out <- Chunk{Source: label, Samples: mono, StartOffset: startOffset}
 }
 
-// emitStereo splits an aggregate buffer into remote (system audio) and local
-// (microphone) signals. When both channels have speech, envelope correlation
-// detects crosstalk (system audio leaking through speakers to the mic). If
-// crosstalk is found the remote channel is always emitted because it carries
-// the original digital signal. Otherwise the weaker channel is suppressed
-// when the stronger exceeds it by domRatio; if neither dominates, both are
-// emitted as separate chunks so the transcriber can attribute them to
-// different speakers.
-func (c *capturer) emitStereo(interleaved []float32, startOffset time.Duration) {
-	remote, local := splitBySource(interleaved, c.numChannels)
-
-	if c.needResample {
-		remote = resample(remote, c.ratio)
-		local = resample(local, c.ratio)
-	}
-
-	remoteSilent := c.isSilent(remote)
-	localSilent := c.isSilent(local)
-
-	if remoteSilent && localSilent {
-		return
-	}
-
-	if !remoteSilent && !localSilent {
-		remoteRMS := rms(remote)
-		localRMS := rms(local)
-
-		if crossCorrelation(remote, local) >= c.crosstalkThresh {
-			c.out <- Chunk{Source: config.LabelSystemAudio, Samples: remote, StartOffset: startOffset}
-			return
-		}
-
-		if remoteRMS >= localRMS*c.domRatio {
-			c.out <- Chunk{Source: config.LabelSystemAudio, Samples: remote, StartOffset: startOffset}
-			return
-		}
-		if localRMS >= remoteRMS*c.domRatio {
-			c.out <- Chunk{Source: config.LabelMicrophone, Samples: local, StartOffset: startOffset}
-			return
-		}
-	}
-
-	if !remoteSilent {
-		c.out <- Chunk{Source: config.LabelSystemAudio, Samples: remote, StartOffset: startOffset}
-	}
-	if !localSilent {
-		c.out <- Chunk{Source: config.LabelMicrophone, Samples: local, StartOffset: startOffset}
-	}
-}
-
-// hasSourceSpeech checks whether the interleaved audio buffer contains speech.
-// In aggregate mode it computes per-source RMS (remote = all channels except
-// the last, local = last channel); in single-source mode it checks the whole buffer.
-func hasSourceSpeech(buf []float32, channels int, aggregate bool, silThresh float64) bool {
-	if !aggregate {
-		return rms(buf) >= silThresh
-	}
-	frames := len(buf) / channels
-	lastCh := channels - 1
-
-	var remoteSumSq, localSumSq float64
-	for i := range frames {
-		base := i * channels
-		var remoteSum float32
-		for ch := range lastCh {
-			remoteSum += buf[base+ch]
-		}
-		r := float64(remoteSum / float32(lastCh))
-		remoteSumSq += r * r
-
-		l := float64(buf[base+lastCh])
-		localSumSq += l * l
-	}
-	remoteRMS := math.Sqrt(remoteSumSq / float64(frames))
-	localRMS := math.Sqrt(localSumSq / float64(frames))
-	return remoteRMS >= silThresh || localRMS >= silThresh
-}
-
-// splitBySource separates an interleaved multi-channel buffer into two mono
-// signals: remote (average of all channels except the last) and local (last
-// channel only). This assumes an aggregate device where BlackHole feeds the
-// first N-1 channels and the built-in microphone feeds the last channel.
-func splitBySource(interleaved []float32, channels int) (remote []float32, local []float32) {
-	frames := len(interleaved) / channels
-	remote = make([]float32, frames)
-	local = make([]float32, frames)
-
-	lastCh := channels - 1
-	for i := range frames {
-		base := i * channels
-		var sum float32
-		for ch := range lastCh {
-			sum += interleaved[base+ch]
-		}
-		remote[i] = sum / float32(lastCh)
-		local[i] = interleaved[base+lastCh]
-	}
-	return remote, local
-}
-
-// envelopeWindowSamples is the number of samples per energy envelope frame.
-// At 16 kHz this gives ~10 ms windows, producing a compact envelope sequence
-// that is robust to room acoustics, reverb, and frequency response changes.
-const envelopeWindowSamples = 160
-
-// crossCorrelation computes the Pearson correlation between the energy
-// envelopes of two signals. Each signal is divided into short frames and
-// the RMS of each frame is computed, yielding a low-rate envelope. Correlating
-// envelopes instead of raw waveforms is robust to the acoustic distortion
-// that occurs when system audio travels from speakers through a room to the
-// microphone (reverb, frequency response, multipath).
-func crossCorrelation(a, b []float32) float64 {
-	if len(a) == 0 || len(a) != len(b) {
-		return 0
-	}
-
-	envA := envelope(a)
-	envB := envelope(b)
-	return pearson(envA, envB)
-}
-
-// envelope computes the RMS energy in consecutive non-overlapping windows,
-// producing a compact representation of the signal's amplitude over time.
-func envelope(samples []float32) []float64 {
-	n := len(samples) / envelopeWindowSamples
-	if n == 0 {
-		return nil
-	}
-	env := make([]float64, n)
-	for i := range n {
-		start := i * envelopeWindowSamples
-		end := start + envelopeWindowSamples
-		env[i] = rms(samples[start:end])
-	}
-	return env
-}
-
-// pearson computes the Pearson correlation coefficient between two sequences.
-func pearson(a, b []float64) float64 {
-	n := len(a)
-	if n == 0 || len(b) != n {
-		return 0
-	}
-
-	var sumA, sumB float64
-	for i := range n {
-		sumA += a[i]
-		sumB += b[i]
-	}
-	meanA := sumA / float64(n)
-	meanB := sumB / float64(n)
-
-	var cov, varA, varB float64
-	for i := range n {
-		da := a[i] - meanA
-		db := b[i] - meanB
-		cov += da * db
-		varA += da * da
-		varB += db * db
-	}
-
-	denom := math.Sqrt(varA * varB)
-	if denom < 1e-12 {
-		return 0
-	}
-	return cov / denom
-}
-
-// rms computes the root mean square of the sample buffer — a measure of
-// signal energy used to distinguish speech from silence.
 func rms(samples []float32) float64 {
 	if len(samples) == 0 {
 		return 0
@@ -436,10 +261,13 @@ func rms(samples []float32) float64 {
 	return math.Sqrt(sumSq / float64(len(samples)))
 }
 
-// mixToMono averages all channels of an interleaved buffer into a single
-// mono signal. Used for single-source capture where we don't need to
-// separate speakers.
+// mixToMono averages all channels into one — whisper requires mono input.
 func mixToMono(interleaved []float32, channels int) []float32 {
+	if channels <= 1 {
+		out := make([]float32, len(interleaved))
+		copy(out, interleaved)
+		return out
+	}
 	frames := len(interleaved) / channels
 	mono := make([]float32, frames)
 	for i := range frames {
@@ -452,10 +280,6 @@ func mixToMono(interleaved []float32, channels int) []float32 {
 	return mono
 }
 
-// resample converts audio from one sample rate to another using linear
-// interpolation. The ratio is targetRate/sourceRate (e.g. 16000/44100).
-// This is needed because whisper.cpp expects 16 kHz input but most audio
-// devices capture at 44.1 or 48 kHz.
 func resample(samples []float32, ratio float64) []float32 {
 	outLen := int(float64(len(samples)) * ratio)
 	out := make([]float32, outLen)
