@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"runtime"
 	"sync"
 
@@ -93,14 +94,14 @@ func (a *App) handleStopClick() {
 }
 
 func showErrorDialog(err error) {
-	script := fmt.Sprintf(`display dialog "Recording stopped unexpectedly:\n\n%s" buttons {"OK"} default button "OK" with title "Kian Error" with icon stop`, err)
-	exec.Command("osascript", "-e", script).Start()
+	exec.Command("osascript",
+		"-e", fmt.Sprintf(`set msg to "Recording stopped unexpectedly:\n\n%s"`, strings.ReplaceAll(err.Error(), `"`, `\"`)),
+		"-e", `display dialog msg buttons {"OK"} default button "OK" with title "Kian Error" with icon stop`,
+	).Start()
 }
 
 func showAboutDialog() {
 	script := `set result to button returned of (display dialog "Kian — Audio Transcription
-
-
 
 https://getkian.app" buttons {"Website", "OK"} default button "OK" with title "About Kian" with icon note)
 if result is "Website" then
@@ -131,7 +132,9 @@ func (a *App) start() {
 	a.mu.Unlock()
 
 	cfg := a.cfg
+	a.mu.Lock()
 	cfg.AudioMode = a.audioMode
+	a.mu.Unlock()
 	cfg.OnSegment = a.onSegment
 
 	go func() {
@@ -192,6 +195,7 @@ func (a *App) toggleAudioSource(clicked *systray.MenuItem) {
 		return
 	}
 
+	a.mu.Lock()
 	switch {
 	case mic && sys:
 		a.audioMode = audio.ModeBoth
@@ -200,6 +204,7 @@ func (a *App) toggleAudioSource(clicked *systray.MenuItem) {
 	default:
 		a.audioMode = audio.ModeSystem
 	}
+	a.mu.Unlock()
 
 	a.syncCheckmarks()
 }

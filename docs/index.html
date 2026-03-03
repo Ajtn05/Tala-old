@@ -277,6 +277,38 @@
       font-size: 0.9rem;
     }
 
+    /* Sample */
+    .sample {
+      padding: 6rem 2rem;
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+    .sample h2 {
+      font-size: 2.2rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      margin-bottom: 3.5rem;
+    }
+    .sample-output {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 2rem;
+      font-family: 'SF Mono', 'Menlo', monospace;
+      font-size: 0.85rem;
+      line-height: 2;
+      color: var(--text-muted);
+      overflow-x: auto;
+    }
+    .sample-output .src { color: var(--accent); }
+    .sample-output .ts { color: #555; }
+    .sample-filename {
+      font-family: 'SF Mono', 'Menlo', monospace;
+      font-size: 0.8rem;
+      color: #555;
+      margin-bottom: 0.8rem;
+    }
+
     /* Installation */
     .installation {
       padding: 6rem 2rem;
@@ -441,16 +473,6 @@
       text-decoration: none;
     }
     footer a:hover { color: var(--text); }
-    .btn-donate {
-      background: transparent;
-      color: #e44;
-      border: 1px solid rgba(228, 68, 68, 0.4);
-    }
-    .btn-donate:hover {
-      background: var(--accent-glow);
-      border-color: var(--accent);
-      transform: translateY(-1px);
-    }
 
     .feature-card a, .use-case a, .spec-item a, .hero a.inline-link {
       color: var(--accent);
@@ -479,7 +501,6 @@
     <a href="#use-cases">Use cases</a>
     <a href="#how-it-works">How it works</a>
     <a href="#installation">Install</a>
-    <a href="https://donate.stripe.com/REPLACE_WITH_YOUR_LINK" class="btn btn-donate" style="padding: 0.5rem 1.2rem; font-size: 0.85rem;">♥ Donate</a>
     <a href="https://github.com/viktorminko/kian" class="btn btn-secondary" style="padding: 0.5rem 1.2rem; font-size: 0.85rem;">GitHub</a>
   </div>
 </nav>
@@ -489,7 +510,7 @@
   <h1>Transcribe everything.<br><em>Right on your Mac.</em></h1>
   <p>Kian sits in your menu bar and transcribes microphone and system audio in real time. Powered by <a href="https://github.com/ggerganov/whisper.cpp" class="inline-link">whisper.cpp</a>. Nothing leaves your machine.</p>
   <div class="cta-group">
-    <a href="https://github.com/viktorminko/kian/releases/latest" class="btn btn-primary">Download for macOS</a>
+    <a href="https://github.com/viktorminko/kian/releases/latest/download/Kian-Installer.dmg" class="btn btn-primary">Download for macOS</a>
     <a href="https://github.com/viktorminko/kian" class="btn btn-secondary">View source</a>
   </div>
 </section>
@@ -508,7 +529,7 @@
     <div class="feature-card">
       <div class="feature-icon">🎙</div>
       <h3>Mic + system audio</h3>
-      <p>Capture your microphone, system audio from any app, or both at the same time with automatic speaker labeling.</p>
+      <p>Capture your microphone, system audio from any app, or both at the same time. Each line is labeled by source so you know what came from where.</p>
     </div>
 
     <div class="feature-card">
@@ -563,7 +584,7 @@
       <div class="use-case-icon">🎙️</div>
       <div>
         <h3>Podcasts and interviews</h3>
-        <p>Turn podcast episodes or recorded interviews into text. Speaker labels help distinguish who said what when using both audio sources.</p>
+        <p>Turn podcast episodes or recorded interviews into text. Source labels show what came from the mic vs. system audio when recording both.</p>
       </div>
     </div>
 
@@ -618,6 +639,18 @@
       <h3>Review</h3>
       <p>Open the output folder from the menu. Your transcripts are organized by date with full timestamps.</p>
     </div>
+  </div>
+</section>
+
+<section class="sample" id="sample">
+  <div class="section-label">Output</div>
+  <h2>What you get.</h2>
+  <div class="sample-filename">~/Documents/Kian/transcript_2025-06-14_10-30-00.txt</div>
+  <div class="sample-output">
+    <span class="src">[System Audio]</span> <span class="ts">[00:00 → 00:08]</span> So the main question is whether we should ship this before the end of the quarter.<br><br>
+    <span class="src">[Microphone]</span> <span class="ts">[00:09 → 00:14]</span> I think we can, but we need to lock the API contract by Friday.<br><br>
+    <span class="src">[System Audio]</span> <span class="ts">[00:15 → 00:22]</span> Makes sense. Let me check with the backend team and get back to you after lunch.<br><br>
+    <span class="src">[Microphone]</span> <span class="ts">[00:23 → 00:27]</span> Sounds good. I'll draft the migration plan in the meantime.
   </div>
 </section>
 
@@ -719,13 +752,12 @@
   <h2>Your conversations, your machine.</h2>
   <p>Free, open source, and completely private.</p>
   <div class="cta-group">
-    <a href="https://github.com/viktorminko/kian/releases/latest" class="btn btn-primary">Download Kian</a>
-    <a href="https://donate.stripe.com/REPLACE_WITH_YOUR_LINK" class="btn btn-donate">♥ Support Kian</a>
+    <a href="https://github.com/viktorminko/kian/releases/latest/download/Kian-Installer.dmg" class="btn btn-primary">Download Kian</a>
   </div>
 </section>
 
 <footer>
-  <p> &middot; <a href="https://github.com/viktorminko/kian">GitHub</a></p>
+  <p><a href="https://github.com/viktorminko/kian">GitHub</a></p>
 </footer>
 
 </body>
