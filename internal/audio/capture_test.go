@@ -1,8 +1,10 @@
 package audio
 
 import (
+	"context"
 	"math"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -10,7 +12,7 @@ import (
 	"kian/internal/config"
 )
 
-func TestRms(t *testing.T) {
+func TestRMS(t *testing.T) {
 	tests := []struct {
 		name    string
 		samples []float32
@@ -50,7 +52,7 @@ func TestRms(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := rms(tt.samples)
+			got := RMS(tt.samples)
 			assert.InDelta(t, tt.want, got, 1e-9)
 		})
 	}
@@ -85,7 +87,7 @@ func TestMixToMono(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := mixToMono(tt.interleaved, tt.channels)
+			got := MixToMono(tt.interleaved, tt.channels)
 			require.Len(t, got, len(tt.want))
 			for i := range got {
 				assert.InDelta(t, tt.want[i], got[i], 1e-6)
@@ -129,35 +131,184 @@ func TestResample(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := resample(tt.samples, tt.ratio)
+			got := Resample(tt.samples, tt.ratio)
 			assert.Len(t, got, tt.wantLen)
 		})
 	}
 }
 
 func TestResample_linearInterpolation(t *testing.T) {
-	// 4 samples at source rate, downsample to ~half
 	samples := []float32{0, 1, 0, 1}
-	got := resample(samples, 0.5)
+	got := Resample(samples, 0.5)
 
-	// Output should have 2 samples, interpolated from source
 	require.Len(t, got, 2)
-	// First output maps to srcIdx=0 → samples[0]=0
 	assert.InDelta(t, float32(0), got[0], 1e-6)
-	// Second output maps to srcIdx=2 → samples[2]=0
 	assert.InDelta(t, float32(0), got[1], 1e-6)
 }
 
 func TestResample_preservesMagnitude(t *testing.T) {
-	// Constant signal should remain constant after resampling
 	samples := make([]float32, 100)
 	for i := range samples {
 		samples[i] = 0.7
 	}
-	got := resample(samples, 16000.0/44100.0)
+	got := Resample(samples, 16000.0/44100.0)
 	for i, v := range got {
 		assert.InDelta(t, 0.7, v, 1e-5, "sample %d", i)
 	}
+}
+
+func newTestCapturer(sampleRate float64, channels int, silThresh float64, silenceSec float64, maxSec float64) (*capturer, chan Chunk) {
+	out := make(chan Chunk, 10)
+	return &capturer{
+		out:           out,
+		sampleRate:    sampleRate,
+		fpb:           int(sampleRate * 0.01), // 10ms buffers
+		numChannels:   channels,
+		needResample:  false,
+		ratio:         1.0,
+		silThresh:     silThresh,
+		silenceFrames: int(sampleRate * silenceSec),
+		maxFrames:     int(sampleRate * maxSec),
+		sourceLabel:   "Test",
+	}, out
+}
+
+func loudBuf(fpb, channels int) []float32 {
+	buf := make([]float32, fpb*channels)
+	for i := range buf {
+		buf[i] = 0.5
+	}
+	return buf
+}
+
+func silentBuf(fpb, channels int) []float32 {
+	return make([]float32, fpb*channels)
+}
+
+func TestCapturer_silenceFlushesChunk(t *testing.T) {
+	// 1000 Hz sample rate, mono, threshold 0.01, silence duration 0.05s (50 frames), max 10s
+	c, out := newTestCapturer(1000, 1, 0.01, 0.05, 10)
+	ctx := context.Background()
+
+	// Feed 3 loud buffers (30ms of speech)
+	for range 3 {
+		c.processBuffer(ctx, loudBuf(c.fpb, 1))
+	}
+	assert.Empty(t, out, "should not emit while speech is ongoing")
+
+	// Feed enough silent buffers to exceed silence duration (50 frames = 5 buffers of 10 frames)
+	for range 6 {
+		c.processBuffer(ctx, silentBuf(c.fpb, 1))
+	}
+
+	require.Len(t, out, 1)
+	chunk := <-out
+	assert.Equal(t, "Test", chunk.Source)
+	assert.NotEmpty(t, chunk.Samples)
+}
+
+func TestCapturer_maxDurationForceFlush(t *testing.T) {
+	// max chunk 0.05s = 50 frames, 10 frame buffers → flush after 5 loud buffers
+	c, out := newTestCapturer(1000, 1, 0.01, 1.0, 0.05)
+	ctx := context.Background()
+
+	for range 6 {
+		c.processBuffer(ctx, loudBuf(c.fpb, 1))
+	}
+
+	require.Len(t, out, 1)
+	chunk := <-out
+	assert.Equal(t, "Test", chunk.Source)
+}
+
+func TestCapturer_silenceOnlyNoChunk(t *testing.T) {
+	c, out := newTestCapturer(1000, 1, 0.01, 0.05, 10)
+	ctx := context.Background()
+
+	for range 20 {
+		c.processBuffer(ctx, silentBuf(c.fpb, 1))
+	}
+
+	assert.Empty(t, out)
+}
+
+func TestCapturer_flushRemainingOnCancel(t *testing.T) {
+	c, out := newTestCapturer(1000, 1, 0.01, 1.0, 10)
+	ctx := context.Background()
+
+	// Feed some speech but not enough silence to flush
+	for range 3 {
+		c.processBuffer(ctx, loudBuf(c.fpb, 1))
+	}
+	assert.Empty(t, out)
+
+	c.flushRemaining(ctx)
+
+	require.Len(t, out, 1)
+	chunk := <-out
+	assert.Equal(t, "Test", chunk.Source)
+}
+
+func TestCapturer_echoSuppression(t *testing.T) {
+	tapActive := &TapActive{}
+	c, out := newTestCapturer(1000, 1, 0.01, 0.05, 10)
+	c.tapActive = tapActive
+	ctx := context.Background()
+
+	// Mark tap as active — mic should suppress
+	tapActive.MarkActive()
+
+	// Feed loud buffers while tap is active — should be treated as silence
+	for range 3 {
+		c.processBuffer(ctx, loudBuf(c.fpb, 1))
+	}
+	assert.Empty(t, out)
+	assert.False(t, c.hasSpeech, "speech should not be detected while tap is active")
+}
+
+func TestCapturer_stereoMixedToMono(t *testing.T) {
+	// Stereo input: left=0.4, right=0.6 → mono=0.5
+	c, out := newTestCapturer(1000, 2, 0.01, 0.02, 10)
+	ctx := context.Background()
+
+	stereo := make([]float32, c.fpb*2)
+	for i := 0; i < len(stereo); i += 2 {
+		stereo[i] = 0.4
+		stereo[i+1] = 0.6
+	}
+
+	c.processBuffer(ctx, stereo)
+	// Feed silence to flush — trailing silence is included in the chunk
+	for range 3 {
+		c.processBuffer(ctx, silentBuf(c.fpb, 2))
+	}
+
+	require.Len(t, out, 1)
+	chunk := <-out
+	// First fpb mono samples should be the averaged stereo speech
+	require.True(t, len(chunk.Samples) >= c.fpb)
+	for i := range c.fpb {
+		assert.InDelta(t, 0.5, chunk.Samples[i], 1e-6, "sample %d", i)
+	}
+}
+
+func TestTapActive(t *testing.T) {
+	ta := &TapActive{}
+
+	t.Run("initially inactive", func(t *testing.T) {
+		assert.False(t, ta.IsActive(time.Second))
+	})
+
+	t.Run("active after mark", func(t *testing.T) {
+		ta.MarkActive()
+		assert.True(t, ta.IsActive(time.Second))
+	})
+
+	t.Run("inactive after window expires", func(t *testing.T) {
+		ta.MarkActive()
+		time.Sleep(15 * time.Millisecond)
+		assert.False(t, ta.IsActive(10*time.Millisecond))
+	})
 }
 
 func TestCaptureConfig_defaults(t *testing.T) {

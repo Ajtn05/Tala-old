@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,6 +13,7 @@ import (
 
 	"kian/internal/audio"
 	"kian/internal/config"
+	"kian/internal/paths"
 	"kian/internal/transcriber"
 )
 
@@ -65,7 +65,7 @@ func Run(ctx context.Context, cfg Config) error {
 	case audio.ModeMicrophone:
 		g.Go(func() error {
 			defer close(chunks)
-			return captureMicrophoneWithTapActive(gctx, cfg, chunks, nil)
+			return captureMicrophone(gctx, cfg, chunks, nil)
 		})
 
 	case audio.ModeSystem:
@@ -83,7 +83,7 @@ func Run(ctx context.Context, cfg Config) error {
 				return captureSystemAudio(innerCtx, cfg, chunks, tapActive)
 			})
 			inner.Go(func() error {
-				return captureMicrophoneWithTapActive(innerCtx, cfg, chunks, tapActive)
+				return captureMicrophone(innerCtx, cfg, chunks, tapActive)
 			})
 			return inner.Wait()
 		})
@@ -100,7 +100,7 @@ func Run(ctx context.Context, cfg Config) error {
 	return g.Wait()
 }
 
-func captureMicrophoneWithTapActive(ctx context.Context, cfg Config, chunks chan<- audio.Chunk, tapActive *audio.TapActive) error {
+func captureMicrophone(ctx context.Context, cfg Config, chunks chan<- audio.Chunk, tapActive *audio.TapActive) error {
 	device, err := audio.FindMicrophone()
 	if err != nil {
 		return err
@@ -129,193 +129,24 @@ func captureSystemAudio(ctx context.Context, cfg Config, chunks chan<- audio.Chu
 	}
 	defer tapDev.StopIO()
 
-	tc := newTapCapturer(tapDev, cfg, tapActive)
-	return tc.readLoop(ctx, chunks)
+	return audio.CaptureTap(ctx, tapDev, audio.TapCaptureConfig{
+		SampleRate:       cfg.DeviceSampleRate,
+		SilenceThreshold: cfg.SilenceThreshold,
+		SilenceDuration:  cfg.SilenceDuration,
+		MaxChunkDuration: cfg.MaxChunkDuration,
+		TapActive:        tapActive,
+	}, chunks)
 }
 
-type tapCapturer struct {
-	tapDev   *audio.TapDevice
-	channels int
-	sampleRate   float64
-	silThresh    float64
-	silFrames    int
-	maxFrames    int
-	needResample bool
-	ratio        float64
-	buf       []float32
-	tapActive *audio.TapActive
-
-	accumulator   []float32
-	silentCount   int
-	totalFrames   int
-	elapsedFrames int
-	hasSpeech     bool
-}
-
-func newTapCapturer(tapDev *audio.TapDevice, cfg Config, tapActive *audio.TapActive) *tapCapturer {
-	sampleRate := cfg.DeviceSampleRate
-	if sampleRate == 0 {
-		sampleRate = 48000
-	}
-
-	channels := tapDev.Channels()
-	if channels == 0 {
-		channels = 2
-	}
-
-	silThresh := cfg.SilenceThreshold
-	if silThresh == 0 {
-		silThresh = config.DefaultSilenceThreshold
-	}
-	silFrames := int(sampleRate * cfg.SilenceDuration)
-	if silFrames == 0 {
-		silFrames = int(sampleRate * config.DefaultSilenceDuration)
-	}
-	maxFrames := int(sampleRate * cfg.MaxChunkDuration)
-	if maxFrames == 0 {
-		maxFrames = int(sampleRate * config.DefaultMaxChunkDuration)
-	}
-
-	return &tapCapturer{
-		tapDev:   tapDev,
-		channels: channels,
-		sampleRate:   sampleRate,
-		silThresh:    silThresh,
-		silFrames:    silFrames,
-		maxFrames:    maxFrames,
-		needResample: math.Abs(sampleRate-audio.TargetSampleRate) > 1.0,
-		ratio:        audio.TargetSampleRate / sampleRate,
-		buf:          make([]float32, config.DefaultFramesPerBuffer*channels),
-		tapActive:    tapActive,
-	}
-}
-
-func (tc *tapCapturer) readLoop(ctx context.Context, chunks chan<- audio.Chunk) error {
-	for {
-		select {
-		case <-ctx.Done():
-			if tc.hasSpeech && len(tc.accumulator) > 0 {
-				tc.emit(ctx, chunks)
-			}
-			return nil
-		default:
-		}
-
-		n := tc.tapDev.ReadSamples(tc.buf)
-		if n == 0 {
-			time.Sleep(5 * time.Millisecond)
-			continue
-		}
-
-		tc.processBuffer(ctx, tc.buf[:n], chunks)
-	}
-}
-
-func (tc *tapCapturer) processBuffer(ctx context.Context, samples []float32, chunks chan<- audio.Chunk) {
-	framesRead := len(samples) / tc.channels
-
-	mono := mixToMono(samples, tc.channels)
-	bufRMS := rms(mono)
-	hasSpeechInBuf := bufRMS >= tc.silThresh
-
-	if hasSpeechInBuf && tc.tapActive != nil {
-		tc.tapActive.MarkActive()
-	}
-
-	tc.elapsedFrames += framesRead
-
-	if hasSpeechInBuf {
-		tc.silentCount = 0
-		tc.hasSpeech = true
-	} else {
-		tc.silentCount += framesRead
-	}
-
-	if !tc.hasSpeech {
-		return
-	}
-
-	tc.accumulator = append(tc.accumulator, samples...)
-	tc.totalFrames += framesRead
-
-	if tc.silentCount < tc.silFrames && tc.totalFrames < tc.maxFrames {
-		return
-	}
-
-	tc.emit(ctx, chunks)
-}
-
-func (tc *tapCapturer) emit(ctx context.Context, chunks chan<- audio.Chunk) {
-	startOffset := time.Duration(float64(tc.elapsedFrames-tc.totalFrames)/tc.sampleRate*1000) * time.Millisecond
-
-	mono := mixToMono(tc.accumulator, tc.channels)
-	if tc.needResample {
-		mono = resample(mono, tc.ratio)
-	}
-	if rms(mono) >= tc.silThresh {
-		select {
-		case chunks <- audio.Chunk{Source: config.LabelSystemAudio, Samples: mono, StartOffset: startOffset}:
-		case <-ctx.Done():
-		}
-	}
-
-	tc.accumulator = tc.accumulator[:0]
-	tc.silentCount = 0
-	tc.totalFrames = 0
-	tc.hasSpeech = false
-}
-
-// mixToMono and resample are local copies of the audio package helpers
-// to avoid circular imports while keeping the tap capture self-contained.
-
-func mixToMono(interleaved []float32, channels int) []float32 {
-	if channels <= 1 {
-		out := make([]float32, len(interleaved))
-		copy(out, interleaved)
-		return out
-	}
-	frames := len(interleaved) / channels
-	mono := make([]float32, frames)
-	for i := range frames {
-		var sum float32
-		for ch := range channels {
-			sum += interleaved[i*channels+ch]
-		}
-		mono[i] = sum / float32(channels)
-	}
-	return mono
-}
-
-func resample(samples []float32, ratio float64) []float32 {
-	outLen := int(float64(len(samples)) * ratio)
-	out := make([]float32, outLen)
-	for i := range out {
-		srcIdx := float64(i) / ratio
-		idx := int(srcIdx)
-		frac := float32(srcIdx - float64(idx))
-		if idx+1 < len(samples) {
-			out[i] = samples[idx]*(1-frac) + samples[idx+1]*frac
-		} else if idx < len(samples) {
-			out[i] = samples[idx]
-		}
-	}
-	return out
-}
-
-func rms(samples []float32) float64 {
-	if len(samples) == 0 {
-		return 0
-	}
-	var sumSq float64
-	for _, s := range samples {
-		sumSq += float64(s) * float64(s)
-	}
-	return math.Sqrt(sumSq / float64(len(samples)))
-}
+type transcribeFunc func(ctx context.Context, samples []float32) ([]transcriber.Segment, error)
 
 func transcribeChunks(ctx context.Context, trans *transcriber.Transcriber, chunks <-chan audio.Chunk, segments chan<- transcriber.Segment) error {
+	return transcribeChunksFunc(ctx, trans.Transcribe, chunks, segments)
+}
+
+func transcribeChunksFunc(ctx context.Context, transcribe transcribeFunc, chunks <-chan audio.Chunk, segments chan<- transcriber.Segment) error {
 	for chunk := range chunks {
-		segs, err := trans.Transcribe(ctx, chunk.Samples)
+		segs, err := transcribe(ctx, chunk.Samples)
 		if err != nil {
 			if ctx.Err() != nil {
 				return nil
@@ -406,18 +237,7 @@ func flushPending(cfg Config, output io.Writer, pending **mergedSegment) error {
 }
 
 func createOutput(dir string) (io.Writer, func(), error) {
-	if dir == "" {
-		dir = config.DefaultOutputDir
-	}
-
-	outDir := dir
-	if !filepath.IsAbs(outDir) {
-		execPath, err := os.Executable()
-		if err != nil {
-			return nil, nil, fmt.Errorf("resolve executable path: %w", err)
-		}
-		outDir = filepath.Join(filepath.Dir(execPath), dir)
-	}
+	outDir := paths.ResolveDir(dir)
 
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		return nil, nil, fmt.Errorf("create output directory %s: %w", outDir, err)

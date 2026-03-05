@@ -38,7 +38,7 @@ const (
 	// MaxChunkDuration is the maximum number of seconds of audio in a
 	// single chunk before it is force-flushed to the transcriber. This
 	// prevents unbounded memory growth during long uninterrupted speech.
-	DefaultMaxChunkDuration = 30.0
+	DefaultMaxChunkDuration = 20.0
 
 )
 
