@@ -6,7 +6,6 @@ import (
 	"log"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"runtime"
 	"sync"
@@ -14,7 +13,7 @@ import (
 	"github.com/energye/systray"
 
 	"kian/internal/audio"
-	"kian/internal/config"
+	"kian/internal/paths"
 	"kian/internal/pipeline"
 )
 
@@ -226,14 +225,7 @@ func (a *App) syncCheckmarks() {
 func (a *App) onSegment(_ string) {}
 
 func (a *App) openOutputFolder() {
-	dir := a.cfg.OutputDir
-	if dir == "" {
-		dir = config.DefaultOutputDir
-	}
-	if !filepath.IsAbs(dir) {
-		dir = filepath.Join(execPath(), dir)
-	}
-
+	dir := paths.ResolveDir(a.cfg.OutputDir)
 	os.MkdirAll(dir, 0o755)
 
 	if runtime.GOOS == "darwin" {
@@ -242,11 +234,3 @@ func (a *App) openOutputFolder() {
 }
 
 func (a *App) onExit() {}
-
-func execPath() string {
-	p, err := os.Executable()
-	if err != nil {
-		return "."
-	}
-	return filepath.Dir(p)
-}

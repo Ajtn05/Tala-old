@@ -188,7 +188,7 @@ func (c *capturer) readLoop(ctx context.Context, stream *portaudio.Stream, buf [
 
 func (c *capturer) processBuffer(ctx context.Context, buf []float32) {
 	suppressed := c.tapActive != nil && c.tapActive.IsActive(300*time.Millisecond)
-	hasSpeechInBuf := !suppressed && rms(buf) >= c.silThresh
+	hasSpeechInBuf := !suppressed && RMS(buf) >= c.silThresh
 	c.elapsedFrames += c.fpb
 
 	if hasSpeechInBuf {
@@ -234,11 +234,11 @@ func (c *capturer) flushAccumulator(ctx context.Context) {
 }
 
 func (c *capturer) emit(ctx context.Context, interleaved []float32, startOffset time.Duration) {
-	mono := mixToMono(interleaved, c.numChannels)
+	mono := MixToMono(interleaved, c.numChannels)
 	if c.needResample {
-		mono = resample(mono, c.ratio)
+		mono = Resample(mono, c.ratio)
 	}
-	if rms(mono) < c.silThresh {
+	if RMS(mono) < c.silThresh {
 		return
 	}
 
@@ -250,50 +250,4 @@ func (c *capturer) emit(ctx context.Context, interleaved []float32, startOffset 
 	case c.out <- Chunk{Source: label, Samples: mono, StartOffset: startOffset}:
 	case <-ctx.Done():
 	}
-}
-
-func rms(samples []float32) float64 {
-	if len(samples) == 0 {
-		return 0
-	}
-	var sumSq float64
-	for _, s := range samples {
-		sumSq += float64(s) * float64(s)
-	}
-	return math.Sqrt(sumSq / float64(len(samples)))
-}
-
-// mixToMono averages all channels into one — whisper requires mono input.
-func mixToMono(interleaved []float32, channels int) []float32 {
-	if channels <= 1 {
-		out := make([]float32, len(interleaved))
-		copy(out, interleaved)
-		return out
-	}
-	frames := len(interleaved) / channels
-	mono := make([]float32, frames)
-	for i := range frames {
-		var sum float32
-		for ch := range channels {
-			sum += interleaved[i*channels+ch]
-		}
-		mono[i] = sum / float32(channels)
-	}
-	return mono
-}
-
-func resample(samples []float32, ratio float64) []float32 {
-	outLen := int(float64(len(samples)) * ratio)
-	out := make([]float32, outLen)
-	for i := range out {
-		srcIdx := float64(i) / ratio
-		idx := int(srcIdx)
-		frac := float32(srcIdx - float64(idx))
-		if idx+1 < len(samples) {
-			out[i] = samples[idx]*(1-frac) + samples[idx+1]*frac
-		} else if idx < len(samples) {
-			out[i] = samples[idx]
-		}
-	}
-	return out
 }

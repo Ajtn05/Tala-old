@@ -6,6 +6,7 @@ on:
     paths:
       - "cmd/**"
       - "internal/**"
+      - "scripts/**"
       - "Makefile"
       - "go.mod"
       - "go.sum"
@@ -22,18 +23,8 @@ jobs:
         with:
           go-version: "1.25"
 
-      - name: Install portaudio
-        run: |
-          brew install portaudio
-          mkdir -p third_party/portaudio_static
-          cp "$(brew --prefix portaudio)/lib/libportaudio.a" third_party/portaudio_static/
-
-      - name: Clone whisper.cpp
-        run: |
-          WHISPER_COMMIT=$(cat WHISPER_VERSION | tr -d '[:space:]')
-          git clone https://github.com/ggerganov/whisper.cpp.git third_party/whisper.cpp
-          cd third_party/whisper.cpp
-          git checkout "$WHISPER_COMMIT"
+      - name: Install dependencies
+        run: bash scripts/setup-deps.sh --no-build
 
       - name: Cache whisper.cpp build
         id: cache-whisper

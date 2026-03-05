@@ -5,17 +5,17 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/gordonklaus/portaudio"
 
 	"kian/internal/config"
+	"kian/internal/paths"
 	"kian/internal/pipeline"
 	"kian/internal/ui"
 )
 
 func main() {
-	modelPath, outputDir := resolveDefaults()
+	modelPath, outputDir := paths.ResolveForBundle()
 	setupLogging(outputDir)
 
 	if err := portaudio.Initialize(); err != nil {
@@ -32,33 +32,6 @@ func main() {
 
 	app := ui.NewApp(cfg)
 	app.Run()
-}
-
-func resolveDefaults() (string, string) {
-	exe, err := os.Executable()
-	if err != nil {
-		return config.DefaultModelPath, config.DefaultOutputDir
-	}
-	exe, err = filepath.EvalSymlinks(exe)
-	if err != nil {
-		return config.DefaultModelPath, config.DefaultOutputDir
-	}
-
-	home, err := os.UserHomeDir()
-	if err != nil {
-		home = os.TempDir()
-	}
-	return resolvePaths(exe, home)
-}
-
-func resolvePaths(exe, home string) (string, string) {
-	dir := filepath.Dir(exe)
-	if !strings.HasSuffix(dir, filepath.Join("Contents", "MacOS")) {
-		return config.DefaultModelPath, config.DefaultOutputDir
-	}
-
-	resourcesDir := filepath.Join(filepath.Dir(dir), "Resources")
-	return filepath.Join(resourcesDir, config.DefaultModelPath), filepath.Join(home, "Documents", "Kian")
 }
 
 func setupLogging(outputDir string) {

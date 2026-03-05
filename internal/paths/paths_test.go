@@ -1,4 +1,4 @@
-package main
+package paths
 
 import (
 	"path/filepath"
@@ -9,7 +9,7 @@ import (
 	"kian/internal/config"
 )
 
-func TestResolvePaths(t *testing.T) {
+func TestResolveForExe(t *testing.T) {
 	tests := []struct {
 		name          string
 		exe           string
@@ -42,9 +42,39 @@ func TestResolvePaths(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			modelPath, outputDir := resolvePaths(tt.exe, tt.home)
+			modelPath, outputDir := resolveForExe(tt.exe, tt.home)
 			assert.Equal(t, tt.wantModelPath, modelPath)
 			assert.Equal(t, tt.wantOutputDir, outputDir)
+		})
+	}
+}
+
+func TestResolveDir(t *testing.T) {
+	tests := []struct {
+		name string
+		dir  string
+		abs  bool
+	}{
+		{
+			name: "absolute path unchanged",
+			dir:  "/tmp/output",
+			abs:  true,
+		},
+		{
+			name: "empty uses default",
+			dir:  "",
+			abs:  false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ResolveDir(tt.dir)
+			if tt.abs {
+				assert.Equal(t, tt.dir, got)
+			} else {
+				assert.NotEmpty(t, got)
+			}
 		})
 	}
 }
