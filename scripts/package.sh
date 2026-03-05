@@ -115,6 +115,7 @@ APP_PATH="$INSTALL_DIR/$APP_NAME"
 MODEL_DIR="$APP_PATH/Contents/Resources/models"
 MODEL_NAME="ggml-large-v3-turbo.bin"
 MODEL_URL="https://huggingface.co/ggerganov/whisper.cpp/resolve/main/$MODEL_NAME"
+MODEL_SHA256="1fc70f774d38eb169993ac391eea357ef47c88757ef72ee5943879b7e8e2bc69"
 ARCHIVE="$1"
 
 echo ""
@@ -154,7 +155,15 @@ if [ ! -f "$MODEL_DIR/$MODEL_NAME" ]; then
     echo "Downloading whisper model (~1.5 GB), this may take a few minutes..."
     mkdir -p "$MODEL_DIR"
     curl -L --progress-bar -o "$MODEL_DIR/$MODEL_NAME" "$MODEL_URL"
-    echo "Model downloaded."
+    ACTUAL_SHA256=$(shasum -a 256 "$MODEL_DIR/$MODEL_NAME" | awk '{print $1}')
+    if [ "$ACTUAL_SHA256" != "$MODEL_SHA256" ]; then
+        echo "ERROR: model checksum mismatch!"
+        echo "  expected: $MODEL_SHA256"
+        echo "  got:      $ACTUAL_SHA256"
+        rm -f "$MODEL_DIR/$MODEL_NAME"
+        exit 1
+    fi
+    echo "Model downloaded and verified."
 fi
 
 echo ""

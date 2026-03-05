@@ -53,24 +53,34 @@ func New(cfg Config) (*Transcriber, error) {
 	}, nil
 }
 
-func (t *Transcriber) Transcribe(_ context.Context, samples []float32) ([]Segment, error) {
-	ctx, err := t.model.NewContext()
+func (t *Transcriber) Transcribe(ctx context.Context, samples []float32) ([]Segment, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	wctx, err := t.model.NewContext()
 	if err != nil {
 		return nil, fmt.Errorf("create context: %w", err)
 	}
 
-	if err := ctx.SetLanguage(t.lang); err != nil {
+	if err := wctx.SetLanguage(t.lang); err != nil {
 		return nil, fmt.Errorf("set language %s: %w", t.lang, err)
 	}
-	ctx.SetThreads(uint(t.threads))
+	wctx.SetThreads(uint(t.threads))
 
-	if err := ctx.Process(samples, nil, nil, nil); err != nil {
+	abort := func() bool {
+		return ctx.Err() == nil
+	}
+	if err := wctx.Process(samples, abort, nil, nil); err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return nil, fmt.Errorf("process audio: %w", err)
 	}
 
 	var segments []Segment
 	for {
-		seg, err := ctx.NextSegment()
+		seg, err := wctx.NextSegment()
 		if err == io.EOF {
 			break
 		}

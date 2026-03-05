@@ -11,3 +11,4 @@ transcript.txt
 .idea/
 *.dmg
 .pr-description.md
+.gocache/

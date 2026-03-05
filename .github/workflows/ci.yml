@@ -9,6 +9,7 @@ on:
       - "Makefile"
       - "go.mod"
       - "go.sum"
+      - "WHISPER_VERSION"
 
 jobs:
   test:
@@ -28,7 +29,11 @@ jobs:
           cp "$(brew --prefix portaudio)/lib/libportaudio.a" third_party/portaudio_static/
 
       - name: Clone whisper.cpp
-        run: git clone --depth 1 https://github.com/ggerganov/whisper.cpp.git third_party/whisper.cpp
+        run: |
+          WHISPER_COMMIT=$(cat WHISPER_VERSION | tr -d '[:space:]')
+          git clone https://github.com/ggerganov/whisper.cpp.git third_party/whisper.cpp
+          cd third_party/whisper.cpp
+          git checkout "$WHISPER_COMMIT"
 
       - name: Cache whisper.cpp build
         id: cache-whisper
