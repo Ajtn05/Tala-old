@@ -169,7 +169,7 @@ func (c *capturer) readLoop(ctx context.Context, stream *portaudio.Stream, buf [
 	for {
 		select {
 		case <-ctx.Done():
-			c.flushRemaining()
+			c.flushRemaining(ctx)
 			return nil
 		default:
 		}
@@ -182,11 +182,11 @@ func (c *capturer) readLoop(ctx context.Context, stream *portaudio.Stream, buf [
 			return fmt.Errorf("read stream: %w", err)
 		}
 
-		c.processBuffer(buf)
+		c.processBuffer(ctx, buf)
 	}
 }
 
-func (c *capturer) processBuffer(buf []float32) {
+func (c *capturer) processBuffer(ctx context.Context, buf []float32) {
 	suppressed := c.tapActive != nil && c.tapActive.IsActive(300*time.Millisecond)
 	hasSpeechInBuf := !suppressed && rms(buf) >= c.silThresh
 	c.elapsedFrames += c.fpb
@@ -211,30 +211,29 @@ func (c *capturer) processBuffer(buf []float32) {
 		return
 	}
 
-	c.flushAccumulator()
+	c.flushAccumulator(ctx)
 }
 
 func (c *capturer) startTime() time.Duration {
 	return time.Duration(float64(c.elapsedFrames-c.totalFrames)/c.sampleRate*1000) * time.Millisecond
 }
 
-func (c *capturer) flushRemaining() {
+func (c *capturer) flushRemaining(ctx context.Context) {
 	if !c.hasSpeech {
 		return
 	}
-	c.emit(c.accumulator, c.startTime())
+	c.emit(ctx, c.accumulator, c.startTime())
 }
 
-func (c *capturer) flushAccumulator() {
-	c.emit(c.accumulator, c.startTime())
+func (c *capturer) flushAccumulator(ctx context.Context) {
+	c.emit(ctx, c.accumulator, c.startTime())
 	c.accumulator = c.accumulator[:0]
 	c.silentCount = 0
 	c.totalFrames = 0
 	c.hasSpeech = false
 }
 
-func (c *capturer) emit(interleaved []float32, startOffset time.Duration) {
-	// mixToMono averages all channels into one — whisper requires mono input.
+func (c *capturer) emit(ctx context.Context, interleaved []float32, startOffset time.Duration) {
 	mono := mixToMono(interleaved, c.numChannels)
 	if c.needResample {
 		mono = resample(mono, c.ratio)
@@ -247,7 +246,10 @@ func (c *capturer) emit(interleaved []float32, startOffset time.Duration) {
 	if label == "" {
 		label = config.LabelUnknown
 	}
-	c.out <- Chunk{Source: label, Samples: mono, StartOffset: startOffset}
+	select {
+	case c.out <- Chunk{Source: label, Samples: mono, StartOffset: startOffset}:
+	case <-ctx.Done():
+	}
 }
 
 func rms(samples []float32) float64 {

@@ -195,7 +195,7 @@ func (tc *tapCapturer) readLoop(ctx context.Context, chunks chan<- audio.Chunk) 
 		select {
 		case <-ctx.Done():
 			if tc.hasSpeech && len(tc.accumulator) > 0 {
-				tc.emit(chunks)
+				tc.emit(ctx, chunks)
 			}
 			return nil
 		default:
@@ -207,11 +207,11 @@ func (tc *tapCapturer) readLoop(ctx context.Context, chunks chan<- audio.Chunk) 
 			continue
 		}
 
-		tc.processBuffer(tc.buf[:n], chunks)
+		tc.processBuffer(ctx, tc.buf[:n], chunks)
 	}
 }
 
-func (tc *tapCapturer) processBuffer(samples []float32, chunks chan<- audio.Chunk) {
+func (tc *tapCapturer) processBuffer(ctx context.Context, samples []float32, chunks chan<- audio.Chunk) {
 	framesRead := len(samples) / tc.channels
 
 	mono := mixToMono(samples, tc.channels)
@@ -242,10 +242,10 @@ func (tc *tapCapturer) processBuffer(samples []float32, chunks chan<- audio.Chun
 		return
 	}
 
-	tc.emit(chunks)
+	tc.emit(ctx, chunks)
 }
 
-func (tc *tapCapturer) emit(chunks chan<- audio.Chunk) {
+func (tc *tapCapturer) emit(ctx context.Context, chunks chan<- audio.Chunk) {
 	startOffset := time.Duration(float64(tc.elapsedFrames-tc.totalFrames)/tc.sampleRate*1000) * time.Millisecond
 
 	mono := mixToMono(tc.accumulator, tc.channels)
@@ -253,7 +253,10 @@ func (tc *tapCapturer) emit(chunks chan<- audio.Chunk) {
 		mono = resample(mono, tc.ratio)
 	}
 	if rms(mono) >= tc.silThresh {
-		chunks <- audio.Chunk{Source: config.LabelSystemAudio, Samples: mono, StartOffset: startOffset}
+		select {
+		case chunks <- audio.Chunk{Source: config.LabelSystemAudio, Samples: mono, StartOffset: startOffset}:
+		case <-ctx.Done():
+		}
 	}
 
 	tc.accumulator = tc.accumulator[:0]
@@ -314,13 +317,20 @@ func transcribeChunks(ctx context.Context, trans *transcriber.Transcriber, chunk
 	for chunk := range chunks {
 		segs, err := trans.Transcribe(ctx, chunk.Samples)
 		if err != nil {
+			if ctx.Err() != nil {
+				return nil
+			}
 			return fmt.Errorf("transcribe: %w", err)
 		}
 		for _, seg := range segs {
 			seg.Source = chunk.Source
 			seg.Start += chunk.StartOffset
 			seg.End += chunk.StartOffset
-			segments <- seg
+			select {
+			case segments <- seg:
+			case <-ctx.Done():
+				return nil
+			}
 		}
 	}
 	return nil
@@ -329,7 +339,9 @@ func transcribeChunks(ctx context.Context, trans *transcriber.Transcriber, chunk
 func writeSegments(cfg Config, output io.Writer, segments <-chan transcriber.Segment) error {
 	var pending *mergedSegment
 	silenceTimer := time.NewTimer(0)
-	silenceTimer.Stop()
+	if !silenceTimer.Stop() {
+		<-silenceTimer.C
+	}
 	defer silenceTimer.Stop()
 
 	silenceFlush := cfg.silenceFlush()
@@ -358,6 +370,12 @@ func writeSegments(cfg Config, output io.Writer, segments <-chan transcriber.Seg
 					pending.text += " "
 				}
 				pending.text += seg.Text
+			}
+			if !silenceTimer.Stop() {
+				select {
+				case <-silenceTimer.C:
+				default:
+				}
 			}
 			silenceTimer.Reset(silenceFlush)
 		case <-silenceTimer.C:

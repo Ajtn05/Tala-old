@@ -27,10 +27,14 @@ mkdir -p "$PORTAUDIO_STATIC_DIR"
 cp "$(brew --prefix portaudio)/lib/libportaudio.a" "$PORTAUDIO_STATIC_DIR/"
 echo "Copied portaudio static library."
 
-# Clone whisper.cpp
+# Clone whisper.cpp at pinned commit
+WHISPER_COMMIT="$(cat "$ROOT_DIR/WHISPER_VERSION" | tr -d '[:space:]')"
 if [ ! -d "$WHISPER_DIR" ]; then
     echo "Cloning whisper.cpp..."
     git clone https://github.com/ggerganov/whisper.cpp.git "$WHISPER_DIR"
+    cd "$WHISPER_DIR"
+    git checkout "$WHISPER_COMMIT"
+    cd "$ROOT_DIR"
 else
     echo "whisper.cpp already cloned."
 fi

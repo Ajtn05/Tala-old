@@ -231,7 +231,7 @@ func (a *App) openOutputFolder() {
 		dir = config.DefaultOutputDir
 	}
 	if !filepath.IsAbs(dir) {
-		dir = filepath.Join(filepath.Dir(execPath()), dir)
+		dir = filepath.Join(execPath(), dir)
 	}
 
 	os.MkdirAll(dir, 0o755)
