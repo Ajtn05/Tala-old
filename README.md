@@ -16,7 +16,7 @@ Prebuilt packages are available from the [latest release](https://github.com/Ajt
 | Linux CLI | [tala-linux-x86_64.tar.gz](https://github.com/Ajtn05/Tala/releases/latest/download/tala-linux-x86_64.tar.gz) | x86_64; built on Ubuntu 24.04, with compatible glibc, ALSA, C++ and OpenMP runtimes |
 | Checksums | [SHA256SUMS.txt](https://github.com/Ajtn05/Tala/releases/latest/download/SHA256SUMS.txt) | SHA-256 checksums for both packages |
 
-The downloads contain no transcription model. Reuse a compatible model or explicitly download one during setup. Intel Mac users can [build from source](#build-from-source). Linux installation and commands are [below](#linux-and-command-line-usage).
+The downloads contain no transcription model. Before your first transcription, complete the [macOS model-download step](#3-download-the-transcription-model-once) or the [Linux model-download step](#2-download-and-verify-the-model). Intel Mac users can [build from source](#build-from-source). Linux installation and commands are [below](#linux-and-command-line-usage).
 
 ## Quickstart — no existing Kian installation needed
 
@@ -107,12 +107,31 @@ Linux supports headless file/URL transcription, microphone recording through Por
 
 ### Install the prebuilt Linux CLI
 
-Download [tala-linux-x86_64.tar.gz](https://github.com/Ajtn05/Tala/releases/latest/download/tala-linux-x86_64.tar.gz) from the [latest release](https://github.com/Ajtn05/Tala/releases/latest). Extract it and prepare the model:
+#### 1. Download and extract Tala
+
+Download [tala-linux-x86_64.tar.gz](https://github.com/Ajtn05/Tala/releases/latest/download/tala-linux-x86_64.tar.gz) from the [latest release](https://github.com/Ajtn05/Tala/releases/latest), then extract it:
 
 ```sh
 tar -xzf tala-linux-x86_64.tar.gz
 ./tala --help
+```
+
+#### 2. Download and verify the model
+
+Before recording or transcribing, download Whisper Large v3 Turbo once. You need an internet connection and at least **2 GB of free space** for Tala and the approximately **1.6 GB model**:
+
+```sh
 ./tala --ensure-model
+./tala --check-model
+```
+
+Wait for both commands to finish successfully. Tala checks for a compatible existing model before downloading and verifies the full SHA-256 checksum before using it. `--check-model` prints the verified model path without downloading anything.
+
+On Linux, the default download location is `~/.local/share/tala/models/ggml-large-v3-turbo.bin`; XDG and `TALA_DATA_DIR` overrides are described below. The model stays outside the extracted program and survives CLI updates. Local-file and microphone transcription can then work offline.
+
+#### 3. Transcribe your first file
+
+```sh
 ./tala --transcribe lecture.mp4
 ```
 
@@ -138,11 +157,13 @@ make package # Creates dist/tala-linux-x86_64.tar.gz on x86_64
 
 `make setup` builds the same pinned Whisper and PortAudio versions, with Metal disabled on Linux. It does not download a model. Linux CI builds the native libraries, runs Go tests, race checks, UI regression tests and CLI smoke checks, and packages the CLI. Real microphone hardware still needs manual validation; see the [verification notes](docs/VERIFICATION.md).
 
-Verify an existing compatible model, or explicitly download one:
+After building, complete [Step 2: Download and verify the model](#2-download-and-verify-the-model) before your first transcription.
+
+To reuse a compatible model stored elsewhere, include its path in each command instead of downloading another copy:
 
 ```sh
 ./tala --model /path/to/ggml-large-v3-turbo.bin --check-model
-./tala --ensure-model
+./tala --model /path/to/ggml-large-v3-turbo.bin --transcribe lecture.mp4
 ```
 
 Linux stores verified downloads in `$XDG_DATA_HOME/tala/models` (default `~/.local/share/tala/models`), settings in `$XDG_CONFIG_HOME/tala/settings.json` (default `~/.config/tala/settings.json`), and transcripts in `$XDG_DATA_HOME/tala/transcripts`. `TALA_DATA_DIR` isolates settings/models and `TALA_OUTPUT_DIR` or `--output` selects transcript storage. Relative XDG environment paths are ignored.
