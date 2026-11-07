@@ -28,31 +28,6 @@ type Metadata struct {
 	Thumbnail string  `json:"thumbnail,omitempty"`
 }
 
-func Tool(name string) (string, error) {
-	if p, e := exec.LookPath(name); e == nil {
-		return p, nil
-	}
-	exe, _ := os.Executable()
-	for _, d := range []string{filepath.Join(filepath.Dir(exe), "..", "Resources", "tools"), "/opt/homebrew/bin", "/usr/local/bin"} {
-		p := filepath.Join(d, name)
-		if info, e := os.Stat(p); e == nil && info.Mode()&0111 != 0 {
-			return p, nil
-		}
-	}
-	return "", fmt.Errorf("%s is needed for this import. Install with: brew install ffmpeg yt-dlp", name)
-}
-func Dependencies() map[string]string {
-	out := map[string]string{}
-	for _, n := range []string{"ffmpeg", "ffprobe", "yt-dlp"} {
-		p, e := Tool(n)
-		if e != nil {
-			out[n] = "Not installed"
-		} else {
-			out[n] = p
-		}
-	}
-	return out
-}
 func ValidateURL(raw string) error {
 	u, e := url.Parse(raw)
 	if e != nil || u.Hostname() == "" || (u.Scheme != "https" && u.Scheme != "http") || u.User != nil {

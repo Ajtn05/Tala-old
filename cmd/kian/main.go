@@ -15,16 +15,28 @@ import (
 	"github.com/gordonklaus/portaudio"
 	"kian/internal/app"
 	"kian/internal/dashboard"
+	"kian/internal/media"
 	"kian/internal/models"
 	"kian/internal/ui"
 )
 
 func main() {
+	checkDependencies := flag.Bool("check-dependencies", false, "Check FFmpeg, ffprobe, and yt-dlp without downloading or opening the app")
 	check := flag.Bool("check-model", false, "Discover and verify existing models without downloading")
 	ensure := flag.Bool("ensure-model", false, "Reuse a verified model; download only if none exists")
 	input := flag.String("transcribe", "", "Transcribe a local file without opening the dashboard")
 	output := flag.String("output", os.Getenv("KIAN_OUTPUT_DIR"), "Transcript directory (default ~/Documents/Kian)")
 	flag.Parse()
+	if *checkDependencies {
+		report := media.Dependencies()
+		b, _ := json.MarshalIndent(report, "", "  ")
+		fmt.Println(string(b))
+		if !report.URL.Ready {
+			fmt.Fprintln(os.Stderr, "Live recording works without these media tools.")
+			os.Exit(1)
+		}
+		return
+	}
 	manager := models.Default()
 	if *check || *ensure {
 		status, err := manager.Ensure(context.Background(), *ensure, nil)

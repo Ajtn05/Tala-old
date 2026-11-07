@@ -2,12 +2,72 @@
 
 A native macOS transcription workspace extending [Kian](https://github.com/viktorminko/kian). Go, AppKit, WKWebView, and the original whisper.cpp Large v3 Turbo engine with Metal. No accounts, subscriptions, cloud inference, Electron, or runtime Node server. macOS 14.2 or later.
 
-## Build and open
+## Quickstart — no existing Kian installation needed
 
-Install Go 1.25+, CMake, pkg-config, Git, and Xcode Command Line Tools. Homebrew can install the build tools:
+Kian Studio works on its own. You need **macOS 14.2 or later**, an internet connection for the initial model download, and at least **2 GB of free space** for the app and model. Media imports may need additional temporary space.
+
+### 1. Install and open Kian Studio
+
+Get `Kian-Studio.dmg` from this repository's [Releases](https://github.com/Ajtn05/Kian-Studio/releases), when a prebuilt release is available. Choose a build for your Mac's processor. If no release is listed, follow [Build from source](#build-from-source) below.
+
+Open the DMG, copy **Kian Studio.app** into `~/Applications/` (create that folder in your home folder if needed), and open the installed app. You do not need Go or the development tools to run a prebuilt app.
+
+The app is ad-hoc signed. If macOS blocks opening it, use the app's **Open** action in Finder or **System Settings → Privacy & Security → Open Anyway**. Open the dashboard from the Kian Studio menu bar icon if the window is hidden.
+
+### 2. Check optional media dependencies
+
+Open **Import media** or **Settings → Media tools**. Kian Studio automatically checks for **ffmpeg**, **ffprobe**, and **yt-dlp**, shows which are available, and explains what is missing for each workflow.
+
+| What you want to do | Extra tools needed |
+| --- | --- |
+| Record microphone or system audio live | None |
+| Import a local audio/video file | FFmpeg and ffprobe |
+| Import a media URL | FFmpeg, ffprobe, and yt-dlp |
+
+For local files, install FFmpeg; its Homebrew package includes ffprobe:
+
+```sh
+brew install ffmpeg
+```
+
+For URL imports as well:
+
+```sh
+brew install ffmpeg yt-dlp
+```
+
+If `brew` is not installed, first install [Homebrew](https://brew.sh/). Then return to the app and click **Check again**. You do not need to restart the app or configure a Python environment. Imports stay disabled until their required tools are found; live recording remains available.
+
+### 3. Download the transcription model once
+
+Open **Settings** and wait for the existing-model check to finish. On a fresh Mac with no compatible model, click **Download model (1.6 GB)**. Wait until Settings shows **Model downloaded**. The app verifies the complete model checksum before using it.
+
+The model is saved at `~/Library/Application Support/Kian/models/ggml-large-v3-turbo.bin`, outside the app bundle, and survives updates and reinstalls. If a compatible model already exists, Kian Studio shows **Existing model reused** and uses it without another download or copy. You never need to install the original Kian first.
+
+### 4. Make your first transcript
+
+- **Live:** choose **Live transcription**, select your audio source, and click **Start recording**. Grant microphone/audio capture access when requested, then click **Stop recording** when finished.
+- **File:** choose **Import media**, select or drop an audio/video file, review its details, and click **Add to queue**.
+- **URL:** in **Import media**, paste a supported media URL, click **Fetch details**, then **Add to queue**.
+
+Open the resulting session to edit, copy, or export it. Transcripts are saved in `~/Documents/Kian/`; allow Documents access if macOS asks. After initial setup, live recording and local-file transcription work offline. URL imports require internet access.
+
+For a Terminal dependency check without opening the dashboard or downloading anything:
+
+```sh
+"$HOME/Applications/Kian Studio.app/Contents/MacOS/kian" --check-dependencies
+```
+
+This prints the resolved tool paths and readiness for local-file and URL imports. It exits with status `1` if any media tool is missing; that does not prevent live recording.
+
+## Build from source
+
+Install Go 1.25+, CMake, pkg-config, Git, and Xcode Command Line Tools. If needed, run `xcode-select --install` and finish its installer first. With Homebrew installed:
 
 ```sh
 brew install go cmake pkg-config
+git clone https://github.com/Ajtn05/Kian-Studio.git
+cd Kian-Studio
 make setup
 make test
 make build
@@ -81,7 +141,7 @@ Install optional media tools once:
 brew install ffmpeg yt-dlp
 ```
 
-They are external tools, not bundled. Studio finds them in PATH, `/opt/homebrew/bin`, `/usr/local/bin`, or a bundle Resources/tools directory. No manual Python environment configuration is needed. Live recording works without either tool. Settings reports each tool's availability and location.
+They are external tools, not bundled. Studio finds them in PATH, `/opt/homebrew/bin`, `/usr/local/bin`, or a bundle Resources/tools directory. No manual Python environment configuration is needed. Live recording works without these tools. Import media and Settings report each tool's availability, location, and readiness for local files versus URLs. Use **Check again** after installing tools; the app also checks again when you open Import media and before enqueueing or processing an import. Missing dependencies are reported before any media download or model loading. The Terminal equivalent is `./kian --check-dependencies`.
 
 Choose Import media, select multiple files or drag them from Finder, review their actual audio format and duration, then add them to the queue. FFmpeg decodes the first audio stream from common audio/video containers. Audio is streamed as 16 kHz mono float PCM in non-overlapping 30-second windows, without playback or deliberate delays. Memory use for decoding is bounded; a whole long video is never loaded into RAM. Recognition near a window boundary may be less accurate than within a window.
 

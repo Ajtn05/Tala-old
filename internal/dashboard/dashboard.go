@@ -21,6 +21,7 @@ import (
 	"unsafe"
 
 	"kian/internal/app"
+	"kian/internal/media"
 	"kian/internal/models"
 	"kian/internal/session"
 )
@@ -122,6 +123,8 @@ func (h *Host) dispatch(r request) (any, error) {
 			go h.OnQuit()
 		}
 		return nil, nil
+	case "dependencies":
+		return media.Dependencies(), nil
 	case "snapshot":
 		return c.Snapshot(), nil
 	case "search":
@@ -214,6 +217,13 @@ func (h *Host) dispatch(r request) (any, error) {
 		}
 		return nil, c.Retry(id)
 	case "probe", "metadata":
+		kind := "file"
+		if r.Action == "metadata" {
+			kind = "url"
+		}
+		if err := media.Dependencies().Require(kind); err != nil {
+			return nil, err
+		}
 		var source string
 		_ = decode(r.Data, &source)
 		ctx, cancel := contextTimeout()

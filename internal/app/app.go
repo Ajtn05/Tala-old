@@ -329,6 +329,9 @@ func (c *Controller) Add(source, kind string, retain bool) error {
 		source = abs
 		kind = "file"
 	}
+	if err := media.Dependencies().Require(kind); err != nil {
+		return err
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	job := Job{ID: session.ID(), Title: filepath.Base(source), Source: source, Kind: kind, State: "waiting", Retain: retain}
@@ -473,6 +476,9 @@ func (c *Controller) worker() {
 	}
 }
 func (c *Controller) process(ctx context.Context, job Job) error {
+	if err := media.Dependencies().Require(job.Kind); err != nil {
+		return err
+	}
 	if e := c.waitBatch(ctx, job.ID); e != nil {
 		return e
 	}

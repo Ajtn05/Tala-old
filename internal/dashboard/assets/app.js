@@ -349,6 +349,46 @@ function renderLive() {
   };
   if ($("#open-model")) $("#open-model").onclick = () => navigate("settings");
 }
+// Recheck after users install tools outside the app; no restart is needed.
+function renderDependencyChecks() {
+  const container=$("#dependency-checks");
+  if(!container)return;
+  const report=state.dependencies;
+  const rows=["ffmpeg","ffprobe","yt-dlp"].map(name=>{
+    const tool=report.tools?.[name];
+    const status=tool ? (tool.available ? "Ready" : "Missing") : "Checking…";
+    const detail=view==="settings" && tool?.available ? tool.path : status;
+    return `<div class="dependency"><span>${escape(name)}</span><small>${escape(detail)}</small></div>`;
+  }).join("");
+  const workflows=[["Local files",report.file],["Media URLs",report.url]].map(([name,flow])=>{
+    if(!flow)return "";
+    if(flow.ready)return `<p>${name}: ready</p>`;
+    return `<p>${name}: missing ${escape(flow.missing.join(", "))}.<br>Install with <code>${escape(flow.installCommand)}</code></p>`;
+  }).join("");
+  container.innerHTML=`${rows}<div class="model-status">${workflows || "Checking media tools…"}<small>Live recording works without these tools.</small></div><button id="recheck-dependencies">Check again</button>`;
+  $("#recheck-dependencies").onclick=()=>refreshDependencies(true);
+  if($("#choose-files"))$("#choose-files").disabled=!report.file?.ready;
+  if($("#fetch-url"))$("#fetch-url").disabled=!report.url?.ready || !!fetchURL.pending;
+  if($("#enqueue-url"))$("#enqueue-url").disabled=!report.url?.ready;
+}
+async function refreshDependencies(retryFiles=false) {
+  const button=$("#recheck-dependencies");if(button)button.disabled=true;
+  try {
+    state.dependencies=await rpc("dependencies");
+    if(view==="import"||view==="settings")renderDependencyChecks();
+    if(view==="import") {
+      if(retryFiles&&state.dependencies.file.ready) {
+        for(const file of files.filter(file=>file.error)) {
+          file.pending=true;file.error="";renderFiles();
+          try{file.meta=await rpc("probe",file.path)}catch(e){file.error=e.message}
+          file.pending=false;
+        }
+      }
+      renderFiles();
+    }
+  } catch(e) {error(e)}
+  finally {if($("#recheck-dependencies"))$("#recheck-dependencies").disabled=false}
+}
 async function setFiles(paths) {
   view = "import";
   selected = null;
@@ -368,7 +408,7 @@ async function setFiles(paths) {
 }
 function renderImport() {
   page(
-    `<div class="page-intro"><h1>Import media</h1><p>Turn recordings into editable transcripts, without playing them in real time.</p></div><button class="dropzone" id="choose-files"><span aria-hidden="true">↥</span><strong>Drop audio or video here</strong><small>or choose files from your Mac</small></button><div class="format-hint">MP3, WAV, M4A, AAC, FLAC, OGG · MP4, MOV, MKV, WEBM, AVI</div><div id="files"></div><div id="file-actions"></div><div class="or-divider">or import a link</div><label for="media-url">Media URL</label><div class="url-row"><input id="media-url" type="url" placeholder="Paste a YouTube or direct media link" autocomplete="off"><button id="fetch-url">Fetch details</button></div><small>YouTube, Shorts, and accessible sites supported by yt-dlp. One video per link.</small><div id="url-details"></div>`,
+    `<div class="page-intro"><h1>Import media</h1><p>Turn recordings into editable transcripts, without playing them in real time.</p></div><div id="dependency-checks" aria-live="polite"></div><button class="dropzone" id="choose-files"><span aria-hidden="true">↥</span><strong>Drop audio or video here</strong><small>or choose files from your Mac</small></button><div class="format-hint">MP3, WAV, M4A, AAC, FLAC, OGG · MP4, MOV, MKV, WEBM, AVI</div><div id="files"></div><div id="file-actions"></div><div class="or-divider">or import a link</div><label for="media-url">Media URL</label><div class="url-row"><input id="media-url" type="url" placeholder="Paste a YouTube or direct media link" autocomplete="off"><button id="fetch-url">Fetch details</button></div><small>YouTube, Shorts, and accessible sites supported by yt-dlp. One video per link.</small><div id="url-details"></div>`,
   );
   $("#choose-files").onclick = () => action("pickFiles");
   $("#fetch-url").onclick = fetchURL;
@@ -379,6 +419,8 @@ function renderImport() {
     urlMeta = null;
     $("#url-details").innerHTML = "";
   };
+  renderDependencyChecks();
+  refreshDependencies();
   renderFiles();
   if (urlMeta) {
     $("#media-url").value = urlMeta.url;
@@ -403,7 +445,7 @@ function renderFiles() {
         }),
     );
   $("#file-actions").innerHTML = files.length
-    ? `<div class="import-actions"><span class="muted">${files.length} file${files.length === 1 ? "" : "s"} selected</span><button id="enqueue-files" class="primary" ${files.some((f) => f.pending || f.error) ? "disabled" : ""}>Add to queue</button></div>`
+    ? `<div class="import-actions"><span class="muted">${files.length} file${files.length === 1 ? "" : "s"} selected</span><button id="enqueue-files" class="primary" ${files.some((f) => f.pending || f.error) || !state.dependencies.file?.ready ? "disabled" : ""}>Add to queue</button></div>`
     : "";
   if ($("#enqueue-files"))
     $("#enqueue-files").onclick = async () => {
@@ -423,6 +465,8 @@ function renderFiles() {
     };
 }
 async function fetchURL() {
+ if(!state.dependencies.url?.ready || fetchURL.pending)return;
+ fetchURL.pending=true;
   const raw = $("#media-url").value.trim(),
     button = $("#fetch-url");
   button.disabled = true;
@@ -433,8 +477,9 @@ async function fetchURL() {
   } catch (e) {
     error(e);
   } finally {
+    fetchURL.pending=false;
     if ($("#fetch-url")) {
-      $("#fetch-url").disabled = false;
+      $("#fetch-url").disabled = !state.dependencies.url?.ready;
       $("#fetch-url").textContent = "Fetch details";
     }
   }
@@ -442,7 +487,7 @@ async function fetchURL() {
 function renderURL() {
   if (!urlMeta || !$("#url-details")) return;
   $("#url-details").innerHTML =
-    `<div class="metadata"><h3>${escape(urlMeta.title)}</h3><small>${duration(urlMeta.duration)} · Audio-only download when available</small></div><div class="import-actions"><label><input id="retain-media" type="checkbox">Keep downloaded media for playback</label><button class="primary" id="enqueue-url">Add to queue</button></div>`;
+    `<div class="metadata"><h3>${escape(urlMeta.title)}</h3><small>${duration(urlMeta.duration)} · Audio-only download when available</small></div><div class="import-actions"><label><input id="retain-media" type="checkbox">Keep downloaded media for playback</label><button class="primary" id="enqueue-url" ${state.dependencies.url?.ready ? "" : "disabled"}>Add to queue</button></div>`;
   $("#enqueue-url").onclick = async () => {
     const b = $("#enqueue-url");
     b.disabled = true;
@@ -700,17 +745,9 @@ function renderSettings() {
   const m = state.model,
     s = state.settings;
   page(
-    `<div class="page-intro"><h1>Settings</h1><p>Local by default. One model for every transcription.</p></div><div class="settings-group"><h2>Whisper Large v3 Turbo</h2><div class="model-status"><strong>${escape({ reused: "✓ Existing model reused", downloaded: "✓ Model downloaded", checking: "Checking existing models…", missing: "Model required" }[m.state] || m.state)}</strong><code>${escape(m.path || m.detail || "Choose an existing model below.")}</code></div><p>Existing Kian installations and the configured model directory are checked before any download. Every model must pass format and SHA-256 verification.</p><label class="field"><span>Existing model path</span><input id="model-path" value="${escape(s.modelPath || m.path || "")}" placeholder="/path/to/ggml-large-v3-turbo.bin"></label><label class="field"><span>Additional model directory</span><input id="model-dir" value="${escape(s.modelDir || "")}" placeholder="Optional directory to search"></label><div class="controls"><button id="choose-model">Choose model…</button><button id="verify-model">Check existing models</button>${m.path ? "" : '<button id="download-model">Download model (1.6 GB)</button>'}</div></div><div class="settings-group"><h2>Recognition</h2><label class="field"><span>Language</span><select id="language"><option value="auto">Automatic (recommended for Taglish)</option><option value="en">English</option><option value="tl">Filipino / Tagalog</option></select></label><label class="field"><span>Optional vocabulary or context</span><textarea id="context-prompt" placeholder="Names, technical terms, or a short context hint"></textarea></label><p>Context may affect recognition. Automatic detection is the default for mixed English and Filipino. Translation is always off.</p><button id="save-settings" class="primary">Save settings</button></div><div class="settings-group"><h2>Media tools</h2><p>FFmpeg decodes local files. yt-dlp imports supported URLs. Tools are used only when importing; no Python environment setup is needed.</p>${Object.entries(
-      state.dependencies,
-    )
-      .map(
-        ([n, p]) =>
-          `<div class="dependency"><span>${escape(n)}</span><small>${escape(p)}</small></div>`,
-      )
-      .join(
-        "",
-      )}<p style="margin-top:16px">If missing, install with Homebrew: <code>brew install ffmpeg yt-dlp</code></p></div><div class="settings-group"><h2>Storage</h2><p>${escape(state.output || "~/Documents/Kian/")}<br>Transcripts are independent of the original media. Temporary import audio is removed after completion, cancellation, or errors.</p><button id="open-storage">Open transcript folder</button></div>`,
+    `<div class="page-intro"><h1>Settings</h1><p>Local by default. One model for every transcription.</p></div><div class="settings-group"><h2>Whisper Large v3 Turbo</h2><div class="model-status"><strong>${escape({ reused: "✓ Existing model reused", downloaded: "✓ Model downloaded", checking: "Checking existing models…", missing: "Model required" }[m.state] || m.state)}</strong><code>${escape(m.path || m.detail || "Choose an existing model below.")}</code></div><p>Existing Kian installations and the configured model directory are checked before any download. Every model must pass format and SHA-256 verification.</p><label class="field"><span>Existing model path</span><input id="model-path" value="${escape(s.modelPath || m.path || "")}" placeholder="/path/to/ggml-large-v3-turbo.bin"></label><label class="field"><span>Additional model directory</span><input id="model-dir" value="${escape(s.modelDir || "")}" placeholder="Optional directory to search"></label><div class="controls"><button id="choose-model">Choose model…</button><button id="verify-model">Check existing models</button>${m.path ? "" : '<button id="download-model">Download model (1.6 GB)</button>'}</div></div><div class="settings-group"><h2>Recognition</h2><label class="field"><span>Language</span><select id="language"><option value="auto">Automatic (recommended for Taglish)</option><option value="en">English</option><option value="tl">Filipino / Tagalog</option></select></label><label class="field"><span>Optional vocabulary or context</span><textarea id="context-prompt" placeholder="Names, technical terms, or a short context hint"></textarea></label><p>Context may affect recognition. Automatic detection is the default for mixed English and Filipino. Translation is always off.</p><button id="save-settings" class="primary">Save settings</button></div><div class="settings-group"><h2>Media tools</h2><p>FFmpeg decodes local files. yt-dlp imports supported URLs. Tools are used only when importing; no Python environment setup is needed.</p><div id="dependency-checks" aria-live="polite"></div></div><div class="settings-group"><h2>Storage</h2><p>${escape(state.output || "~/Documents/Kian/")}<br>Transcripts are independent of the original media. Temporary import audio is removed after completion, cancellation, or errors.</p><button id="open-storage">Open transcript folder</button></div>`,
   );
+  renderDependencyChecks();
   $("#language").value = s.language || "auto";
   $("#context-prompt").value = s.prompt || "";
   $("#choose-model").onclick = () => action("pickModel");
