@@ -10,17 +10,18 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
 
-	"kian/internal/audio"
-	"kian/internal/config"
-	"kian/internal/media"
-	"kian/internal/models"
-	"kian/internal/pipeline"
-	"kian/internal/session"
-	"kian/internal/transcriber"
+	"tala/internal/audio"
+	"tala/internal/config"
+	"tala/internal/media"
+	"tala/internal/models"
+	"tala/internal/pipeline"
+	"tala/internal/session"
+	"tala/internal/transcriber"
 )
 
 type Event struct {
@@ -50,31 +51,44 @@ type Live struct {
 	Error     string     `json:"error,omitempty"`
 }
 type Controller struct {
-	mu         sync.Mutex
-	cond       *sync.Cond
-	Store      *session.Store
-	Models     models.Manager
-	engineMu   sync.Mutex
-	engine     *transcriber.Transcriber
-	Model      models.Status
-	live       Live
-	liveCancel context.CancelFunc
-	liveDone   chan struct{}
-	jobs       []Job
-	cancelJob  context.CancelFunc
-	activeJob  string
-	ctx        context.Context
-	cancel     context.CancelFunc
-	wake       chan struct{}
-	Events     chan Event
-	workerDone chan struct{}
-	resync     bool
-	modelBusy  bool
+	mu          sync.Mutex
+	cond        *sync.Cond
+	Store       *session.Store
+	Models      models.Manager
+	engineMu    sync.Mutex
+	engine      *transcriber.Transcriber
+	Model       models.Status
+	live        Live
+	liveCancel  context.CancelFunc
+	liveDone    chan struct{}
+	jobs        []Job
+	cancelJob   context.CancelFunc
+	activeJob   string
+	ctx         context.Context
+	cancel      context.CancelFunc
+	wake        chan struct{}
+	Events      chan Event
+	workerDone  chan struct{}
+	resync      bool
+	modelBusy   bool
+	settingsMu  sync.Mutex
+	recognition *models.Settings
+	headless    bool
+	ownedJobs   map[string]bool
 }
 
 func New(output string) (*Controller, error) { return newController(output, models.Default()) }
+
+// NewHeadless applies recognition options to this invocation only. Existing
+// waiting jobs remain in the queue until the dashboard next resumes them.
+func NewHeadless(output string, settings models.Settings) (*Controller, error) {
+	return newControllerWithOptions(output, models.Default(), &settings)
+}
 func newController(output string, manager models.Manager) (*Controller, error) {
-	c := &Controller{Store: &session.Store{Dir: output}, Models: manager, wake: make(chan struct{}, 1), workerDone: make(chan struct{}), Events: make(chan Event, 128)}
+	return newControllerWithOptions(output, manager, nil)
+}
+func newControllerWithOptions(output string, manager models.Manager, recognition *models.Settings) (*Controller, error) {
+	c := &Controller{Store: &session.Store{Dir: output}, Models: manager, wake: make(chan struct{}, 1), workerDone: make(chan struct{}), Events: make(chan Event, 128), recognition: recognition, headless: recognition != nil, ownedJobs: map[string]bool{}}
 	c.ctx, c.cancel = context.WithCancel(context.Background())
 	c.cond = sync.NewCond(&c.mu)
 	if e := os.MkdirAll(output, 0700); e != nil {
@@ -187,8 +201,12 @@ func (c *Controller) ensureEngine() error {
 	if status.Path == "" {
 		return errors.New("wait for model verification, or choose a valid model in Settings")
 	}
-	c.Emit("activity", "Loading Whisper with Metal acceleration…")
-	settings := c.Models.Settings()
+	message := "Loading Whisper for CPU inference…"
+	if runtime.GOOS == "darwin" {
+		message = "Loading Whisper with Metal acceleration…"
+	}
+	c.Emit("activity", message)
+	settings := c.recognitionSettings()
 	engine, e := transcriber.New(transcriber.Config{ModelPath: status.Path, Language: settings.Language, Prompt: settings.Prompt, Threads: config.DefaultThreads})
 	if e != nil {
 		return e
@@ -203,9 +221,15 @@ func (c *Controller) Transcribe(ctx context.Context, samples []float32) ([]trans
 	}
 	c.engineMu.Lock()
 	defer c.engineMu.Unlock()
-	s := c.Models.Settings()
+	s := c.recognitionSettings()
 	c.engine.SetOptions(s.Language, s.Prompt)
 	return c.engine.Transcribe(ctx, samples)
+}
+func (c *Controller) recognitionSettings() models.Settings {
+	if c.recognition != nil {
+		return *c.recognition
+	}
+	return c.Models.Settings()
 }
 func (c *Controller) SetMode(mode audio.Mode) error {
 	c.mu.Lock()
@@ -310,27 +334,31 @@ func (c *Controller) finishSession(id, status string, duration float64) error {
 	})
 }
 func (c *Controller) Add(source, kind string, retain bool) error {
+	_, err := c.Enqueue(source, kind, retain)
+	return err
+}
+func (c *Controller) Enqueue(source, kind string, retain bool) (Job, error) {
 	if kind == "url" {
 		if e := media.ValidateURL(source); e != nil {
-			return e
+			return Job{}, e
 		}
 	} else {
 		abs, e := filepath.Abs(source)
 		if e != nil {
-			return e
+			return Job{}, e
 		}
 		info, e := os.Stat(abs)
 		if e != nil {
-			return e
+			return Job{}, e
 		}
 		if !info.Mode().IsRegular() {
-			return errors.New("select a media file")
+			return Job{}, errors.New("select a media file")
 		}
 		source = abs
 		kind = "file"
 	}
 	if err := media.Dependencies().Require(kind); err != nil {
-		return err
+		return Job{}, err
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -338,11 +366,20 @@ func (c *Controller) Add(source, kind string, retain bool) error {
 	c.jobs = append(c.jobs, job)
 	if e := c.saveJobsLocked(); e != nil {
 		c.jobs = c.jobs[:len(c.jobs)-1]
-		return e
+		return Job{}, e
 	}
+	if c.ownedJobs == nil {
+		c.ownedJobs = map[string]bool{}
+	}
+	c.ownedJobs[job.ID] = true
 	c.emitLocked("jobs", append([]Job{}, c.jobs...))
 	c.signal()
-	return nil
+	return job, nil
+}
+func (c *Controller) Jobs() []Job {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]Job{}, c.jobs...)
 }
 func (c *Controller) changeJob(id string, fn func(*Job)) {
 	c.mu.Lock()
@@ -435,7 +472,7 @@ func (c *Controller) worker() {
 			c.mu.Lock()
 			var job *Job
 			for i := range c.jobs {
-				if c.jobs[i].State == "waiting" {
+				if c.jobs[i].State == "waiting" && (!c.headless || c.ownedJobs[c.jobs[i].ID]) {
 					v := c.jobs[i]
 					job = &v
 					break
@@ -493,7 +530,7 @@ func (c *Controller) process(ctx context.Context, job Job) error {
 			return err
 		}
 		c.changeJob(job.ID, func(j *Job) { j.Title = meta.Title; j.Duration = meta.Duration })
-		tmp, e := os.MkdirTemp("", "kian-media-*")
+		tmp, e := os.MkdirTemp("", "tala-media-*")
 		if e != nil {
 			return e
 		}
@@ -626,6 +663,8 @@ func copyFile(ctx context.Context, src, dest string) error {
 	return nil
 }
 func (c *Controller) Configure(s models.Settings) error {
+	c.settingsMu.Lock()
+	defer c.settingsMu.Unlock()
 	if s.Language != "auto" && s.Language != "en" && s.Language != "tl" {
 		return errors.New("choose automatic, English, or Filipino")
 	}
@@ -656,8 +695,25 @@ func (c *Controller) Configure(s models.Settings) error {
 	c.mu.Lock()
 	c.Model = status
 	c.emitLocked("model", status)
+	c.emitLocked("settings", s)
 	c.mu.Unlock()
+	if s.ModelPath == old.ModelPath && s.ModelDir == old.ModelDir {
+		return nil
+	}
 	return e
+}
+
+// SetMenuBarIcon can be changed during recording and without a verified model.
+func (c *Controller) SetMenuBarIcon(enabled bool) error {
+	c.settingsMu.Lock()
+	defer c.settingsMu.Unlock()
+	s := c.Models.Settings()
+	s.MenuBarIcon = enabled
+	if err := c.Models.Save(s); err != nil {
+		return err
+	}
+	c.Emit("settings", s)
+	return nil
 }
 func (c *Controller) DownloadModel() error {
 	c.mu.Lock()

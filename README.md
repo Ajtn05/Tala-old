@@ -1,28 +1,30 @@
-# Kian Studio
+# Tala
 
-A native macOS transcription workspace extending [Kian](https://github.com/viktorminko/kian). Go, AppKit, WKWebView, and the original whisper.cpp Large v3 Turbo engine with Metal. No accounts, subscriptions, cloud inference, Electron, or runtime Node server. macOS 14.2 or later.
+Local transcription with a native dashboard on macOS 14.2 or later and a headless command-line interface on Linux. Record your microphone or system audio, or transcribe audio/video files and supported media URLs. Tala is free, with no accounts, subscriptions, or cloud inference. It builds on [Kian](https://github.com/viktorminko/kian) and Whisper Large v3 Turbo with Metal acceleration on macOS and CPU inference on Linux. See [Linux and command-line usage](#linux-and-command-line-usage).
+
+**Multilingual by design:** transcribe English, Filipino/Tagalog, Taglish, and other languages supported by Whisper. Automatic language detection preserves the original speech; Tala does not translate, formalize, or rewrite the transcript.
 
 ## Quickstart — no existing Kian installation needed
 
-Kian Studio works on its own. You need **macOS 14.2 or later**, an internet connection for the initial model download, and at least **2 GB of free space** for the app and model. Media imports may need additional temporary space.
+Tala works on its own. You need **macOS 14.2 or later**, an internet connection for the initial model download, and at least **2 GB of free space** for the app and model. Media imports may need additional temporary space.
 
-### 1. Install and open Kian Studio
+### 1. Install and open Tala
 
-Get `Kian-Studio.dmg` from this repository's [Releases](https://github.com/Ajtn05/Kian-Studio/releases), when a prebuilt release is available. Choose a build for your Mac's processor. If no release is listed, follow [Build from source](#build-from-source) below.
+Get `Tala.dmg` from this repository's [Releases](https://github.com/Ajtn05/Kian-Studio/releases), when a prebuilt release is available. Choose a build for your Mac's processor. If no release is listed, follow [Build from source](#build-from-source) below.
 
-Open the DMG, copy **Kian Studio.app** into `~/Applications/` (create that folder in your home folder if needed), and open the installed app. You do not need Go or the development tools to run a prebuilt app.
+Open the DMG, copy **Tala.app** into `~/Applications/` (create that folder in your home folder if needed), and open the installed app. You do not need Go or the development tools to run a prebuilt app.
 
-The app is ad-hoc signed. If macOS blocks opening it, use the app's **Open** action in Finder or **System Settings → Privacy & Security → Open Anyway**. Open the dashboard from the Kian Studio menu bar icon if the window is hidden.
+The app is ad-hoc signed. If macOS blocks opening it, use the app's **Open** action in Finder or **System Settings → Privacy & Security → Open Anyway**. Tala appears in the Dock while running. Click its Dock icon to reopen the window. Optional recording controls are available through **Settings → Application → Show Tala in the menu bar**, which is off by default. The title bar is integrated into the interface; standard close, minimize, and full-screen controls remain available.
 
 ### 2. Check optional media dependencies
 
-Open **Import media** or **Settings → Media tools**. Kian Studio automatically checks for **ffmpeg**, **ffprobe**, and **yt-dlp**, shows which are available, and explains what is missing for each workflow.
+Open **New transcription → Import audio or video**, or **Settings → Media tools**. Tala automatically checks for **ffmpeg**, **ffprobe**, and **yt-dlp**, shows which are available, and explains what is missing for each workflow.
 
-| What you want to do | Extra tools needed |
-| --- | --- |
-| Record microphone or system audio live | None |
-| Import a local audio/video file | FFmpeg and ffprobe |
-| Import a media URL | FFmpeg, ffprobe, and yt-dlp |
+| What you want to do                    | Extra tools needed          |
+| -------------------------------------- | --------------------------- |
+| Record microphone or system audio live | None                        |
+| Import a local audio/video file        | FFmpeg and ffprobe          |
+| Import a media URL                     | FFmpeg, ffprobe, and yt-dlp |
 
 For local files, install FFmpeg; its Homebrew package includes ffprobe:
 
@@ -42,20 +44,22 @@ If `brew` is not installed, first install [Homebrew](https://brew.sh/). Then ret
 
 Open **Settings** and wait for the existing-model check to finish. On a fresh Mac with no compatible model, click **Download model (1.6 GB)**. Wait until Settings shows **Model downloaded**. The app verifies the complete model checksum before using it.
 
-The model is saved at `~/Library/Application Support/Kian/models/ggml-large-v3-turbo.bin`, outside the app bundle, and survives updates and reinstalls. If a compatible model already exists, Kian Studio shows **Existing model reused** and uses it without another download or copy. You never need to install the original Kian first.
+The model is saved at `~/Library/Application Support/Kian/models/ggml-large-v3-turbo.bin`, outside the app bundle, and survives updates and reinstalls. If a compatible model already exists, Tala shows **Existing model verified** and uses it without another download or copy. You never need to install the original Kian first.
 
 ### 4. Make your first transcript
 
-- **Live:** choose **Live transcription**, select your audio source, and click **Start recording**. Grant microphone/audio capture access when requested, then click **Stop recording** when finished.
-- **File:** choose **Import media**, select or drop an audio/video file, review its details, and click **Add to queue**.
-- **URL:** in **Import media**, paste a supported media URL, click **Fetch details**, then **Add to queue**.
+Leave **Settings → Language → Automatic / multilingual** selected for mixed-language speech, including Taglish. Optional English and Filipino/Tagalog settings are available for recordings in one language. The same language settings apply to live, file, and URL transcription.
 
-Open the resulting session to edit, copy, or export it. Transcripts are saved in `~/Documents/Kian/`; allow Documents access if macOS asks. After initial setup, live recording and local-file transcription work offline. URL imports require internet access.
+- **Live:** choose **New transcription → Record live audio**, select your audio source, and click **Start recording**. Grant microphone/audio capture access when requested, then click **Stop recording** when finished.
+- **File:** choose **New transcription → Import audio or video**, select or drop an audio/video file, review its details, and click **Add to queue**.
+- **URL:** in **New transcription → Import audio or video**, paste a supported media URL, click **Fetch details**, then **Add to queue**.
+
+Open the resulting session to edit, copy, or export it. **Copy text**, **Format**, and **Export file…** stay at the bottom of the window while the transcript scrolls. Transcripts are saved in `~/Documents/Kian/`; allow Documents access if macOS asks. After initial setup, live recording and local-file transcription work offline. URL imports require internet access.
 
 For a Terminal dependency check without opening the dashboard or downloading anything:
 
 ```sh
-"$HOME/Applications/Kian Studio.app/Contents/MacOS/kian" --check-dependencies
+"$HOME/Applications/Tala.app/Contents/MacOS/tala" --check-dependencies
 ```
 
 This prints the resolved tool paths and readiness for local-file and URL imports. It exits with status `1` if any media tool is missing; that does not prevent live recording.
@@ -66,24 +70,85 @@ Install Go 1.25+, CMake, pkg-config, Git, and Xcode Command Line Tools. If neede
 
 ```sh
 brew install go cmake pkg-config
-git clone https://github.com/Ajtn05/Kian-Studio.git
-cd Kian-Studio
+git clone https://github.com/Ajtn05/Kian-Studio.git Tala
+cd Tala
 make setup
 make test
 make build
 bash scripts/bundle.sh
-open 'dist/Kian Studio.app'
+open 'dist/Tala.app'
 ```
 
 `make setup` builds pinned whisper.cpp v1.8.3 and PortAudio v19.7.0 statically inside `third_party/`. It does **not** download a model. The dashboard assets are embedded in the binary. The app links only macOS system libraries.
 
 `make clean` removes development binaries, archived builds in `dist/previous-builds/`, disposable `.verification/` test output, the Go build cache, and the formatter cache. It keeps the latest app and DMG, the local Go toolchain, native build dependencies, settings, transcripts outside the test directory, and installed models. A generated directory containing a `.bin` or `.gguf` model path is preserved.
 
-`bash scripts/package.sh` creates `dist/Kian-Studio.dmg`. The bundle is ad-hoc signed; it is not Developer ID signed or notarized. Normal macOS Gatekeeper approval may be required. Intel builds must be built on Intel; the generated binary matches the build machine.
+`bash scripts/package.sh` creates `dist/Tala.dmg`. The bundle is ad-hoc signed; it is not Developer ID signed or notarized. Normal macOS Gatekeeper approval may be required. Intel builds must be built on Intel; the generated binary matches the build machine.
+
+## Linux and command-line usage
+
+Linux supports headless file/URL transcription, microphone recording through PortAudio/ALSA, saved-session listing, and TXT/Markdown/SRT/VTT/JSON exports. The AppKit dashboard, menu bar, and CoreAudio system-audio taps require macOS. Linux currently uses CPU inference; there is no Linux desktop UI or CUDA setup in this build.
+
+Install Go **1.25 or later** from [Go's downloads](https://go.dev/dl/) if your distribution does not provide it. Debian/Ubuntu build prerequisites:
+
+```sh
+sudo apt update
+sudo apt install build-essential git cmake pkg-config libasound2-dev ffmpeg
+# Optional, for media URLs (use a current yt-dlp package):
+sudo apt install yt-dlp
+
+git clone https://github.com/Ajtn05/Kian-Studio.git Tala
+cd Tala
+make setup
+make test
+make build
+make package # Creates dist/tala-linux-x86_64.tar.gz on x86_64
+```
+
+`make setup` builds the same pinned Whisper and PortAudio versions, with Metal disabled on Linux. It does not download a model. A Linux CI job is configured to build and test the CLI on Ubuntu 24.04 and upload a `tala-linux-x86_64` artifact. Linux runtime/hardware checks still require a Linux host; see the verification notes.
+
+Verify an existing compatible model, or explicitly download one:
+
+```sh
+./tala --model /path/to/ggml-large-v3-turbo.bin --check-model
+./tala --ensure-model
+```
+
+Linux stores verified downloads in `$XDG_DATA_HOME/tala/models` (default `~/.local/share/tala/models`), settings in `$XDG_CONFIG_HOME/tala/settings.json` (default `~/.config/tala/settings.json`), and transcripts in `$XDG_DATA_HOME/tala/transcripts`. `TALA_DATA_DIR` isolates settings/models and `TALA_OUTPUT_DIR` or `--output` selects transcript storage. Relative XDG environment paths are ignored.
+
+The same CLI commands work on macOS. Put options before positional inputs; quote paths and URLs:
+
+```sh
+# Print text to stdout and save a structured local session.
+./tala --transcribe lecture.mp4
+./tala --single-line --transcribe lecture.mp4 > lecture.txt
+./tala --format srt --transcribe lecture.mp4 > lecture.srt
+./tala --language auto --prompt 'Ateneo, Kubernetes, barangay' --transcribe lecture.mp4
+./tala --transcribe 'https://example.org/media'
+
+# Process multiple inputs sequentially with one model.
+./tala --format json first.wav second.mp4 > sessions.json
+# Multiple JSON results form a stream of JSON documents, not one JSON array.
+
+# Record the default microphone for one minute, or omit duration and stop with Ctrl+C.
+./tala --record --duration 1m --format txt
+
+# List and export existing sessions without loading a model or starting queued work.
+./tala --list
+./tala --export SESSION_ID --single-line > transcript.txt
+./tala --export SESSION_ID --format vtt > transcript.vtt
+./tala --help
+```
+
+Recognition flags apply only to the invocation; `--prompt=''` clears a saved vocabulary hint for that run. `--format` accepts `txt`, `md`, `srt`, `vtt`, or `json`. `--text-mode` accepts `clean`, `continuous`, `timestamps`, or `sources`; `--single-line` is an alias for `continuous`. Subtitle output requires one input per invocation and always preserves segment timings.
+
+Progress and errors go to stderr; stdout contains the selected result format. Sessions and partial transcripts are saved locally. Ctrl+C cancels file/URL work and exits with status 130; for live recording, it stops capture, drains buffered speech, saves, and exports the result. `--duration` begins when recording starts. A headless invocation does not resume earlier waiting jobs from the dashboard. Close an app using the same data directory before starting a recording or transcription CLI command; use separate `TALA_DATA_DIR` and `--output` directories for isolated workspaces.
+
+On Linux, microphone recording uses an available PortAudio input, including ALSA devices named “default” or “hw:0.” System audio and combined capture are macOS-only; on Linux, record your monitor source using your audio tools, then transcribe the saved file.
 
 ## Reuse your existing model
 
-Kian Studio verifies the GGML header and the full SHA-256 checksum before using a model. The pinned unquantized multilingual Large v3 Turbo model has SHA-256:
+Tala verifies the GGML header and the full SHA-256 checksum before using a model. The pinned unquantized multilingual Large v3 Turbo model has SHA-256:
 
 ```text
 1fc70f774d38eb169993ac391eea357ef47c88757ef72ee5943879b7e8e2bc69
@@ -91,13 +156,13 @@ Kian Studio verifies the GGML header and the full SHA-256 checksum before using 
 
 Discovery checks, in preference order:
 
-1. `KIAN_MODEL_PATH` and the path saved in Settings.
-2. `KIAN_MODEL_DIR` and the additional model directory saved in Settings.
+1. `TALA_MODEL_PATH` (or legacy `KIAN_MODEL_PATH`) and the path saved in Settings.
+2. `TALA_MODEL_DIR` (or legacy `KIAN_MODEL_DIR`) and the additional model directory saved in Settings.
 3. `~/Applications/Kian.app/Contents/Resources/models/ggml-large-v3-turbo.bin`.
 4. `/Applications/Kian.app/Contents/Resources/models/ggml-large-v3-turbo.bin`.
 5. `~/Library/Application Support/Kian/models/ggml-large-v3-turbo.bin`.
 6. The running bundle's Resources/models directory and the development models directory.
-7. Other `Kian*.app` installations directly under `~/Applications` and `/Applications`.
+7. Other `Kian*.app` or `Tala*.app` installations directly under `~/Applications` and `/Applications`.
 
 A valid existing model is opened **at its current location**, including through a symlink. No copy is made. In Settings, the status explicitly says **Existing model reused** or **Model downloaded**, and displays the resolved path. Other models, formats, or quantized variants are deliberately rejected by the pinned checksum.
 
@@ -106,28 +171,28 @@ If none is valid, use Settings → Choose model, enter an existing model path/di
 Read-only verification is also available from Terminal:
 
 ```sh
-./kian --check-model
+./tala --check-model
 # Explicitly permit a download only when discovery finds no valid model:
-./kian --ensure-model
+./tala --ensure-model
 ```
 
-Keep the original Kian installation while reusing a model inside it. To move away from that installation later, first copy its model to a durable directory yourself and choose that path in Settings; verify it successfully before changing anything else. Kian Studio never removes the original app or model.
+Keep the original Kian installation while reusing a model inside it. To move away from that installation later, first copy its model to a durable directory yourself and choose that path in Settings; verify it successfully before changing anything else. Tala never removes the original app or model.
 
 ## Install and update safely
 
-Kian Studio uses a separate application name and bundle ID (`app.getkian.studio`). It can coexist with the original Kian. Stop recording in the original app before recording in Studio to avoid competing audio capture and inference.
+Tala uses a separate application name and bundle ID (`io.github.ajtn05.tala`). It can coexist with the original Kian. Stop recording in the original app before recording in Tala to avoid competing audio capture and inference.
 
 ```sh
-bash scripts/install.sh 'dist/Kian Studio.app'
+bash scripts/install.sh 'dist/Tala.app'
 ```
 
-The installer checks model reuse first, installs the small app, and opens it. It never replaces an existing app: repeated installs receive a dated destination name. It never downloads a model by default. For unattended setup, explicitly set `KIAN_DOWNLOAD_IF_MISSING=1`; the same verified discovery still runs before any download. `KIAN_NO_LAUNCH=1` suppresses launch. An optional second argument selects the installation directory.
+The installer checks model reuse first, installs the small app, and opens it. It never replaces an existing app: repeated installs receive a dated destination name. It never downloads a model by default. For unattended setup, explicitly set `TALA_DOWNLOAD_IF_MISSING=1`; the same verified discovery still runs before any download. `TALA_NO_LAUNCH=1` suppresses launch. An optional second argument selects the installation directory.
 
 Rebuilds preserve previous bundles in `dist/previous-builds/`, including any files someone may have placed inside them. Installation and packaging scripts have no app/model deletion path. Application Support model files and settings, and Documents transcripts, survive rebuilds, updates, and reinstallations. No model is included in the 13 MB application bundle.
 
 ## Live recording
 
-Open Live transcription, choose Microphone, System audio, or both, and start recording. The menu bar and dashboard use the same controller, source selection, and start/stop state. Changing sources requires stopping first. Closing the dashboard hides its window; capture continues. Reopen it from the menu bar.
+Open New transcription → Record live audio, choose Microphone, System audio, or both, and start recording. The menu bar and dashboard use the same controller, source selection, and start/stop state. Changing sources requires stopping first. Closing the dashboard hides its window; capture continues. Reopen it from the Dock, or the menu bar if enabled.
 
 Grant microphone and audio capture permissions when macOS asks. Settings → Privacy & Security → Microphone / Audio Capture can restore denied access. A rebuilt ad-hoc signed app may need fresh permission. Documents access may also be requested. All capture and inference stay on the Mac.
 
@@ -141,11 +206,11 @@ Install optional media tools once:
 brew install ffmpeg yt-dlp
 ```
 
-They are external tools, not bundled. Studio finds them in PATH, `/opt/homebrew/bin`, `/usr/local/bin`, or a bundle Resources/tools directory. No manual Python environment configuration is needed. Live recording works without these tools. Import media and Settings report each tool's availability, location, and readiness for local files versus URLs. Use **Check again** after installing tools; the app also checks again when you open Import media and before enqueueing or processing an import. Missing dependencies are reported before any media download or model loading. The Terminal equivalent is `./kian --check-dependencies`.
+They are external tools, not bundled. Tala finds them in PATH, `/opt/homebrew/bin`, `/usr/local/bin`, or a bundle Resources/tools directory. No manual Python environment configuration is needed. Live recording works without these tools. Import media and Settings report each tool's availability, location, and readiness for local files versus URLs. Use **Check again** after installing tools; the app also checks again when you open Import media and before enqueueing or processing an import. Missing dependencies are reported before any media download or model loading. The Terminal equivalent is `./tala --check-dependencies`.
 
-Choose Import media, select multiple files or drag them from Finder, review their actual audio format and duration, then add them to the queue. FFmpeg decodes the first audio stream from common audio/video containers. Audio is streamed as 16 kHz mono float PCM in non-overlapping 30-second windows, without playback or deliberate delays. Memory use for decoding is bounded; a whole long video is never loaded into RAM. Recognition near a window boundary may be less accurate than within a window.
+Choose New transcription → Import audio or video, select multiple files or drag them from Finder, review their actual audio format and duration, then add them to the queue. FFmpeg decodes the first audio stream from common audio/video containers. Audio is streamed as 16 kHz mono float PCM in non-overlapping 30-second windows, without playback or deliberate delays. Memory use for decoding is bounded; a whole long video is never loaded into RAM. Recognition near a window boundary may be less accurate than within a window.
 
-For a URL, fetch its metadata, review the title and duration, and add it to the queue. Accessible YouTube videos, Shorts, direct media URLs, and sites supported by the installed yt-dlp are supported. Playlists are limited to one selected video; multi-video playlist expansion is not implemented. Restricted, private, DRM-protected, unavailable, and network-failed media report tool errors. Studio does not supply credentials or bypass access controls. Only import content you are authorized to access.
+For a URL, fetch its metadata, review the title and duration, and add it to the queue. Accessible YouTube videos, Shorts, direct media URLs, and sites supported by the installed yt-dlp are supported. Playlists are limited to one selected video; multi-video playlist expansion is not implemented. Restricted, private, DRM-protected, unavailable, and network-failed media report tool errors. Tala does not supply credentials or bypass access controls. Only import content you are authorized to access.
 
 URL audio is downloaded into a private temporary directory. Temporary downloads are removed on success, error, and cancellation. An explicit Keep downloaded media option retains one durable copy under Documents/Kian/media for review. Original local files are referenced in place and never deleted. A crash or forced kill can leave an OS temporary directory; it does not affect original media.
 
@@ -155,7 +220,7 @@ When live recording starts, the current import finishes its active inference win
 
 ## Review, edit, and export
 
-Live, file, and URL sessions share one viewer. Choose Clean text, Timestamped, or Source-aware without rerunning inference. Adjust font size, auto-scroll, or search with Cmd+F. Cmd+N starts a new transcription. Standard Cmd+C / Cmd+A / Cmd+V editing shortcuts are available. The pin button keeps the dashboard above other windows.
+Live, file, and URL sessions share one viewer. Choose Text only · paragraphs, Text only · single line, Timestamps, or Sources + timestamps without rerunning inference. Single line joins segments and collapses whitespace when copying or exporting plain text; the viewer still wraps to the window width. Subtitle timings stay unchanged. Adjust font size, auto-scroll, or search with Cmd+F. Cmd+N starts a new transcription. Standard Cmd+C / Cmd+A / Cmd+V editing shortcuts are available. The pin button keeps the dashboard above other windows.
 
 Hover or focus a segment and choose Edit. Save correction stores it separately from the original text. Restore original removes the correction. Incoming segments do not replace saved corrections. History searches titles and corrected transcript contents; sessions can be renamed or deleted with a confirmation. Deletion removes only structured session files, preserving original media, legacy TXT files, and models. A small deletion record prevents a preserved legacy file from reappearing in history on the next launch.
 
@@ -163,7 +228,7 @@ Copy transcript uses the selected display mode. Text selection and Cmd+C copy a 
 
 For retained/imported local media, Review media opens native AVPlayer controls. In timestamped/source-aware view, clicking a timestamp seeks without automatically starting playback. URL sessions with discarded media retain their original source URL. Finder playback requires a codec supported by AVFoundation; FFmpeg may transcribe additional formats that AVFoundation cannot play.
 
-Automatic multilingual detection is the default for English, Filipino, and Taglish. Optional English/Filipino settings and a vocabulary/context hint are available. Translation is always disabled; there is no cleanup or rewriting model.
+Automatic multilingual detection is the default for English, Filipino, and Taglish. Optional English/Filipino settings and vocabulary hints are available. List expected names, acronyms, or specialist words, or give a short description, such as “A Taglish lecture about Kubernetes at Ateneo de Manila.” Whisper uses the hint to guide recognition of new audio; it is not a replacement dictionary or a rewriting instruction, and spelling is not guaranteed. Leave it blank for general recordings. Translation is always disabled; there is no cleanup or rewriting model.
 
 ## Local data and architecture
 
@@ -171,11 +236,13 @@ Automatic multilingual detection is the default for English, Filipino, and Tagli
 - `~/Documents/Kian/sessions/<id>.jsonl`: append-only finalized segment journal, synced on append. Complete records survive a truncated final record.
 - `~/Documents/Kian/transcript_*.txt`: compatible live text output; existing files are imported without modification or fabricated timestamps.
 - `~/Documents/Kian/queue.json`: atomically written queue metadata.
-- `~/Library/Application Support/Kian/settings.json`: model path, model directory, recognition options.
+- `~/Library/Application Support/Kian/settings.json`: model path, model directory, recognition options, optional menu bar icon (off by default).
 - `~/Library/Application Support/Kian/models/`: verified downloads only.
 - macOS preferences: window geometry, selected session, display mode, font size.
 
-`KIAN_DATA_DIR` overrides Application Support storage for isolated testing. `--output /path` or `KIAN_OUTPUT_DIR` overrides transcript storage. The normal defaults above are unchanged.
+`TALA_DATA_DIR` overrides Application Support storage for isolated testing. `--output /path` or `TALA_OUTPUT_DIR` overrides transcript storage. Legacy `KIAN_DATA_DIR`, `KIAN_OUTPUT_DIR`, `KIAN_MODEL_PATH`, and `KIAN_MODEL_DIR` remain supported; their `TALA_` equivalents take precedence. The installer also accepts the legacy `KIAN_DOWNLOAD_IF_MISSING` and `KIAN_NO_LAUNCH` names.
+
+The `Kian` storage folder names above are intentionally retained so existing model settings, downloads, transcripts, and pending jobs remain available after the rename. Tala's native window/session preferences also read the previous Kian Studio preferences on first use.
 
 The WKWebView loads only bundled assets and uses a narrow native script bridge, without a listening HTTP server. Navigation is blocked; the content security policy prevents external assets/network calls. Transcript text is inserted as text, not HTML. Event delivery is bounded and recovers by requesting a snapshot after overflow. Slow UI delivery does not block audio capture/inference. The controller serializes GPU access, and session persistence is independent of the window lifecycle.
 
@@ -184,12 +251,13 @@ The WKWebView loads only bundled assets and uses a narrow native script bridge, 
 ```sh
 make test
 make race
+make test-ui # Optional Node.js development check for file-drop handlers
 # Optional real installed-model checksum integration:
-KIAN_TEST_MODEL="$HOME/Applications/Kian.app/Contents/Resources/models/ggml-large-v3-turbo.bin" make test
+TALA_TEST_MODEL="$HOME/Applications/Kian.app/Contents/Resources/models/ggml-large-v3-turbo.bin" make test
 # Direct local batch smoke test, without the dashboard:
-./kian --transcribe third_party/whisper.cpp/samples/jfk.mp3 --output /tmp/kian-smoke
+./tala --transcribe third_party/whisper.cpp/samples/jfk.mp3 --output /tmp/tala-smoke
 ```
 
 See [verification notes](docs/VERIFICATION.md) for exercised paths and remaining manual checks. Floating captions, playlist expansion, and current-playback segment highlighting are not implemented.
 
-MIT; upstream license and attribution are preserved.
+MIT; upstream license and attribution are preserved. Tala is an independent extension of Kian; the original project is credited above.

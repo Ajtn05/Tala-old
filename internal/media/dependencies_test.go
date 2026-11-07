@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -22,6 +23,13 @@ func TestDependencyReadinessByWorkflow(t *testing.T) {
 		{"all", []string{"ffmpeg", "ffprobe", "yt-dlp"}, true, true, "", ""},
 	}
 	for _, tc := range cases {
+		if runtime.GOOS == "linux" {
+			for _, command := range []*string{&tc.fileCommand, &tc.urlCommand} {
+				if *command != "" {
+					*command = packageInstallCommand("linux", strings.Fields(strings.TrimPrefix(*command, "brew install ")))
+				}
+			}
+		}
 		t.Run(tc.name, func(t *testing.T) {
 			report := dependencies(func(name string) (string, error) {
 				for _, installed := range tc.installed {
@@ -93,7 +101,7 @@ func TestToolUsesPATHBeforeFallback(t *testing.T) {
 	if err != nil || path != "/configured/ffmpeg" {
 		t.Fatalf("PATH was not preferred: %q %v", path, err)
 	}
-	if _, err = findTool("ffprobe", func(string) (string, error) { return "", errors.New("absent") }, nil); err == nil || !strings.Contains(err.Error(), "brew install ffmpeg") {
+	if _, err = findTool("ffprobe", func(string) (string, error) { return "", errors.New("absent") }, nil); err == nil || !strings.Contains(err.Error(), installCommand([]string{"ffprobe"})) {
 		t.Fatal("ffprobe should be supplied by the ffmpeg package")
 	}
 }

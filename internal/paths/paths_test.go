@@ -6,7 +6,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"kian/internal/config"
+	"tala/internal/config"
 )
 
 func TestResolveForExe(t *testing.T) {

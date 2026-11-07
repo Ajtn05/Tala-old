@@ -1,3 +1,5 @@
+//go:build darwin
+
 // Package dashboard hosts bundled assets in AppKit/WKWebView. The bridge has no network listener.
 package dashboard
 
@@ -16,20 +18,43 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 	"sync"
 	"unsafe"
 
-	"kian/internal/app"
-	"kian/internal/media"
-	"kian/internal/models"
-	"kian/internal/session"
+	"tala/internal/app"
+	"tala/internal/media"
+	"tala/internal/models"
+	"tala/internal/session"
 )
 
 //go:embed assets/*
 var assets embed.FS
 var current *Host
 var currentMu sync.Mutex
+var ready func()
+
+// AppKit must run on the process's original thread, before main can migrate.
+func init() { runtime.LockOSThread() }
+
+// Run starts AppKit before opening Documents storage so permission prompts work.
+func Run(initialize func()) {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	ready = initialize
+	C.dashboardRun()
+}
+
+//export goDashboardReady
+func goDashboardReady() { go ready() }
+
+func Stop() { C.dashboardStop() }
+func StartupError(message string) {
+	p := str(message)
+	defer C.free(unsafe.Pointer(p))
+	C.dashboardStartupError(p)
+}
 
 type Host struct {
 	Controller *app.Controller
@@ -47,11 +72,14 @@ func (h *Host) Init() {
 	html, _ := assets.ReadFile("assets/index.html")
 	css, _ := assets.ReadFile("assets/style.css")
 	js, _ := assets.ReadFile("assets/app.js")
+	logo, _ := assets.ReadFile("assets/logo.svg")
 	page := strings.ReplaceAll(string(html), "/*STYLE*/", string(css))
+	page = strings.ReplaceAll(page, "/*LOGO*/", string(logo))
 	page = strings.ReplaceAll(page, "/*SCRIPT*/", "try {\n"+string(js)+"\n} catch(e) {document.getElementById('error').hidden=false;document.querySelector('#error span').textContent=String(e.stack||e);}")
 	p := str(page)
 	C.dashboardInit(p)
 	C.free(unsafe.Pointer(p))
+	h.SyncMenuBar()
 	go func() {
 		for e := range h.Controller.Events {
 			if h.OnEvent != nil {
@@ -63,6 +91,18 @@ func (h *Host) Init() {
 	}()
 }
 func (h *Host) Show() { C.dashboardShow() }
+func (h *Host) Quit() { C.dashboardQuit() }
+func (h *Host) SyncMenuBar() {
+	v := h.Controller.LiveState()
+	var enabled, active C.int
+	if h.Controller.Models.Settings().MenuBarIcon {
+		enabled = 1
+	}
+	if v.Active {
+		active = 1
+	}
+	C.dashboardMenuBar(enabled, active, C.int(v.Mode))
+}
 func (h *Host) Send(v any) {
 	h.sendMu.Lock()
 	defer h.sendMu.Unlock()
@@ -104,6 +144,11 @@ func (h *Host) handle(raw string) {
 		return
 	}
 	data, err := h.dispatch(r)
+	if r.ID < 0 && err != nil {
+		h.Controller.Emit("error", err.Error())
+		h.Show()
+		return
+	}
 	reply := map[string]any{"id": r.ID, "result": data}
 	if err != nil {
 		reply["error"] = err.Error()
@@ -244,6 +289,12 @@ func (h *Host) dispatch(r request) (any, error) {
 			return nil, e
 		}
 		return nil, c.Configure(s)
+	case "menuBarIcon":
+		var enabled bool
+		if e := decode(r.Data, &enabled); e != nil {
+			return nil, e
+		}
+		return nil, c.SetMenuBarIcon(enabled)
 	case "downloadModel":
 		return nil, c.DownloadModel()
 	case "verifyModel":

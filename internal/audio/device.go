@@ -32,5 +32,14 @@ func FindMicrophone() (*portaudio.DeviceInfo, error) {
 	if fallback != nil {
 		return fallback, nil
 	}
-	return nil, fmt.Errorf("microphone not found — no input device with \"microphone\" in its name")
+	// ALSA and PulseAudio devices commonly use names such as "default" or "hw:0".
+	if device, err := portaudio.DefaultInputDevice(); err == nil && device.MaxInputChannels > 0 {
+		return device, nil
+	}
+	for _, device := range devices {
+		if device.MaxInputChannels > 0 {
+			return device, nil
+		}
+	}
+	return nil, fmt.Errorf("microphone not found — no audio input device is available")
 }

@@ -7,7 +7,7 @@
       http-equiv="Content-Security-Policy"
       content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; connect-src 'none'"
     />
-    <title>Kian Studio</title>
+    <title>Tala</title>
     <style>
       /*STYLE*/
     </style>
@@ -15,46 +15,41 @@
   <body>
     <div id="app">
       <aside aria-label="Navigation">
-        <div class="brand">
-          <span class="mark" aria-hidden="true"
-            ><i></i><i></i><i></i><i></i><i></i></span
-          >Kian <span class="edition">Studio</span>
-        </div>
+        <div class="brand"><span class="mark">/*LOGO*/</span>Tala</div>
         <button class="new-button" data-nav="new">
-          <span aria-hidden="true">＋</span> New transcription <kbd>⌘ N</kbd>
+          <span class="nav-icon" data-icon="plus" aria-hidden="true"></span> New
+          transcription <kbd>⌘ N</kbd>
         </button>
         <nav>
-          <button data-nav="live">
-            <span class="nav-icon" aria-hidden="true">◉</span>Live
-            transcription<span id="live-dot"></span></button
-          ><button data-nav="import">
-            <span class="nav-icon" aria-hidden="true">↥</span>Import media</button
-          ><button data-nav="queue">
-            <span class="nav-icon" aria-hidden="true">☷</span>Processing
-            queue<span id="queue-count" class="count"></span>
+          <button id="active-recording" hidden>
+            <span class="nav-icon" data-icon="record" aria-hidden="true"></span
+            >Recording in progress<span id="live-dot"></span>
+          </button>
+          <button data-nav="queue">
+            <span class="nav-icon" data-icon="queue" aria-hidden="true"></span
+            >Processing queue<span id="queue-count" class="count"></span>
           </button>
         </nav>
         <div class="sidebar-heading">
           <span>Sessions</span
           ><button
             id="all-history"
-            class="icon-button"
+            class="text-button"
             aria-label="View all sessions"
           >
-            ⌕
+            View all
           </button>
         </div>
         <div id="recent" class="recent"></div>
         <div class="sidebar-bottom">
           <button data-nav="settings">
-            <span class="nav-icon" aria-hidden="true">⚙</span>Settings<span
-              id="model-dot"
-              class="status-dot"
-            ></span>
+            <span
+              class="nav-icon"
+              data-icon="settings"
+              aria-hidden="true"
+            ></span
+            >Settings<span id="model-dot" class="status-dot"></span>
           </button>
-          <div class="local-note">
-            <span aria-hidden="true">⌁</span> Transcribed on your Mac
-          </div>
         </div>
       </aside>
       <main>
@@ -64,16 +59,23 @@
             <span id="activity"></span
             ><button
               id="pin"
-              class="icon-button"
+              class="pin-button"
               title="Always on top"
               aria-label="Always on top"
               aria-pressed="false"
             >
-              ♧
+              <span class="nav-icon" data-icon="pin" aria-hidden="true"></span>
+              Keep on top
             </button>
           </div>
         </header>
         <div id="content" tabindex="-1"></div>
+        <div
+          id="session-tools"
+          role="toolbar"
+          aria-label="Transcript export"
+          hidden
+        ></div>
       </main>
     </div>
     <div id="toast" role="status" aria-live="polite"></div>

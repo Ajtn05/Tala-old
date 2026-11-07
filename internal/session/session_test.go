@@ -53,6 +53,27 @@ func TestOrderingCorrectionAndExportPersistence(t *testing.T) {
 		t.Fatal("restore original failed")
 	}
 }
+func TestContinuousTextUsesCorrectionsWithoutLineBreaks(t *testing.T) {
+	v := Session{Title: "Lecture", Corrections: map[string]string{"2": " corrected\r\ntext\t here "}, Segments: []Segment{
+		{ID: "1", Text: " Hello\nworld. ", Start: 0, End: 1},
+		{ID: "2", Text: "original", Start: 1, End: 2},
+		{ID: "3", Text: " \n\t ", Start: 2, End: 3},
+		{ID: "4", Text: "Salamat!", Untimed: true},
+	}}
+	text, err := Export(v, "txt", "continuous")
+	if err != nil || text != "Hello world. corrected text here Salamat!" {
+		t.Fatalf("continuous: %q %v", text, err)
+	}
+	text, err = Export(v, "txt", "clean")
+	if err != nil || !strings.Contains(text, "\n\n") {
+		t.Fatal("paragraph layout was lost")
+	}
+	v.Segments = v.Segments[:2]
+	text, err = Export(v, "srt", "continuous")
+	if err != nil || !strings.Contains(text, "00:00:01,000 --> 00:00:02,000") {
+		t.Fatalf("subtitle timing changed: %q %v", text, err)
+	}
+}
 func TestConcurrentAppendsDoNotOverwriteCorrections(t *testing.T) {
 	s, v := sample(t)
 	seg, _ := s.Append(v.ID, Segment{Text: "original", Start: 1, End: 2})

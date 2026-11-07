@@ -5,29 +5,29 @@ ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT_DIR"
 make build
 DIST_DIR="$ROOT_DIR/dist"
-APP_DIR="$DIST_DIR/Kian Studio.app"
+APP_DIR="$DIST_DIR/Tala.app"
 mkdir -p "$DIST_DIR"
 STAGE="$(mktemp -d "$DIST_DIR/.bundle.XXXXXX")"
 trap 'rm -rf "$STAGE"' EXIT
-BUNDLE="$STAGE/Kian Studio.app"
+BUNDLE="$STAGE/Tala.app"
 mkdir -p "$BUNDLE/Contents/MacOS" "$BUNDLE/Contents/Resources"
-cp kian "$BUNDLE/Contents/MacOS/kian"
+cp tala "$BUNDLE/Contents/MacOS/tala"
 cp icons/AppIcon.icns "$BUNDLE/Contents/Resources/"
 cat > "$BUNDLE/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-<key>CFBundleName</key><string>Kian Studio</string>
-<key>CFBundleDisplayName</key><string>Kian Studio</string>
-<key>CFBundleIdentifier</key><string>app.getkian.studio</string>
+<key>CFBundleName</key><string>Tala</string>
+<key>CFBundleDisplayName</key><string>Tala</string>
+<key>CFBundleIdentifier</key><string>io.github.ajtn05.tala</string>
 <key>CFBundleVersion</key><string>2.0.0</string>
 <key>CFBundleShortVersionString</key><string>2.0.0</string>
-<key>CFBundleExecutable</key><string>kian</string>
+<key>CFBundleExecutable</key><string>tala</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>LSMinimumSystemVersion</key><string>14.2</string>
-<key>LSUIElement</key><true/>
-<key>NSMicrophoneUsageDescription</key><string>Kian Studio transcribes microphone audio locally.</string>
-<key>NSAudioCaptureUsageDescription</key><string>Kian Studio transcribes system audio locally.</string>
+<key>LSUIElement</key><false/>
+<key>NSMicrophoneUsageDescription</key><string>Tala transcribes microphone audio locally.</string>
+<key>NSAudioCaptureUsageDescription</key><string>Tala transcribes system audio locally.</string>
 <key>CFBundleIconFile</key><string>AppIcon</string>
 <key>NSHighResolutionCapable</key><true/>
 </dict></plist>
@@ -36,7 +36,7 @@ codesign --force --deep --sign - "$BUNDLE"
 if [[ -e "$APP_DIR" ]]; then
     BACKUP="$DIST_DIR/previous-builds/$(date +%Y%m%d-%H%M%S)-$$"
     mkdir -p "$BACKUP"
-    mv "$APP_DIR" "$BACKUP/Kian Studio.app.backup"
+    mv "$APP_DIR" "$BACKUP/Tala.app.backup"
     echo "Previous build preserved at $BACKUP"
 fi
 mv "$BUNDLE" "$APP_DIR"

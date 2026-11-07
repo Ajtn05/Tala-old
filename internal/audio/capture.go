@@ -11,7 +11,7 @@ import (
 
 	"github.com/gordonklaus/portaudio"
 
-	"kian/internal/config"
+	"tala/internal/config"
 )
 
 // TapActive tracks whether the system audio tap is currently producing

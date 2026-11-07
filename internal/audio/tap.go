@@ -1,3 +1,5 @@
+//go:build darwin
+
 package audio
 
 /*
@@ -14,8 +16,8 @@ import (
 )
 
 const (
-	tapName = "Kian Tap"
-	tapUID  = "com.kian.tap"
+	tapName = "Tala Tap"
+	tapUID  = "io.github.ajtn05.tala.tap"
 )
 
 // TapDevice holds the CoreAudio resources for a process tap session.
@@ -107,4 +109,3 @@ func (t *TapDevice) Destroy() error {
 	}
 	return firstErr
 }
-

@@ -8,7 +8,7 @@ import (
 
 	whisper "github.com/ggerganov/whisper.cpp/bindings/go/pkg/whisper"
 
-	"kian/internal/config"
+	"tala/internal/config"
 )
 
 type Segment struct {

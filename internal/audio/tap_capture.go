@@ -5,7 +5,7 @@ import (
 	"math"
 	"time"
 
-	"kian/internal/config"
+	"tala/internal/config"
 )
 
 // TapCaptureConfig holds parameters for capturing from a CoreAudio process tap.

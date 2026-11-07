@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -21,10 +22,11 @@ const SHA256 = "1fc70f774d38eb169993ac391eea357ef47c88757ef72ee5943879b7e8e2bc69
 const URL = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/" + Name
 
 type Settings struct {
-	ModelPath string `json:"modelPath"`
-	ModelDir  string `json:"modelDir"`
-	Language  string `json:"language"`
-	Prompt    string `json:"prompt"`
+	ModelPath   string `json:"modelPath"`
+	ModelDir    string `json:"modelDir"`
+	Language    string `json:"language"`
+	Prompt      string `json:"prompt"`
+	MenuBarIcon bool   `json:"menuBarIcon"`
 }
 type Status struct {
 	Path   string `json:"path"`
@@ -40,12 +42,36 @@ func Default() Manager {
 	return Manager{h, e, w}
 }
 func (m Manager) Root() string {
-	if root := os.Getenv("KIAN_DATA_DIR"); root != "" {
+	if root := Environment("DATA_DIR"); root != "" {
 		return root
+	}
+	if runtime.GOOS == "linux" {
+		return xdgPath("XDG_DATA_HOME", filepath.Join(m.Home, ".local", "share"), "tala")
 	}
 	return filepath.Join(m.Home, "Library", "Application Support", "Kian")
 }
-func (m Manager) ConfigPath() string { return filepath.Join(m.Root(), "settings.json") }
+func (m Manager) ConfigPath() string {
+	if runtime.GOOS == "linux" && Environment("DATA_DIR") == "" {
+		return xdgPath("XDG_CONFIG_HOME", filepath.Join(m.Home, ".config"), "tala", "settings.json")
+	}
+	return filepath.Join(m.Root(), "settings.json")
+}
+func xdgPath(key, fallback string, parts ...string) string {
+	base := os.Getenv(key)
+	if !filepath.IsAbs(base) {
+		base = fallback
+	}
+	return filepath.Join(append([]string{base}, parts...)...)
+}
+func (m Manager) OutputDir() string {
+	if dir := Environment("OUTPUT_DIR"); dir != "" {
+		return dir
+	}
+	if runtime.GOOS == "linux" {
+		return filepath.Join(m.Root(), "transcripts")
+	}
+	return filepath.Join(m.Home, "Documents", "Kian")
+}
 func (m Manager) Settings() Settings {
 	var s Settings
 	if b, err := os.ReadFile(m.ConfigPath()); err == nil {
@@ -76,9 +102,10 @@ func (m Manager) Candidates(s Settings) []string {
 			paths = append(paths, m.expand(p))
 		}
 	}
+	add(os.Getenv("TALA_MODEL_PATH"))
 	add(os.Getenv("KIAN_MODEL_PATH"))
 	add(s.ModelPath)
-	for _, d := range []string{os.Getenv("KIAN_MODEL_DIR"), s.ModelDir} {
+	for _, d := range []string{os.Getenv("TALA_MODEL_DIR"), os.Getenv("KIAN_MODEL_DIR"), s.ModelDir} {
 		if d != "" {
 			add(filepath.Join(d, Name))
 		}
@@ -90,8 +117,10 @@ func (m Manager) Candidates(s Settings) []string {
 	add(filepath.Join(m.WorkingDir, "models", Name))
 	// Also discover previous side-by-side installs, without touching their files.
 	for _, base := range []string{filepath.Join(m.Home, "Applications"), "/Applications"} {
-		found, _ := filepath.Glob(filepath.Join(base, "Kian*.app", "Contents", "Resources", "models", Name))
-		paths = append(paths, found...)
+		for _, pattern := range []string{"Kian*.app", "Tala*.app"} {
+			found, _ := filepath.Glob(filepath.Join(base, pattern, "Contents", "Resources", "models", Name))
+			paths = append(paths, found...)
+		}
 	}
 	seen := map[string]bool{}
 	var unique []string
@@ -249,7 +278,7 @@ func AtomicWrite(path string, b []byte) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		return err
 	}
-	f, err := os.CreateTemp(filepath.Dir(path), ".kian-*")
+	f, err := os.CreateTemp(filepath.Dir(path), ".tala-*")
 	if err != nil {
 		return err
 	}
@@ -265,4 +294,12 @@ func AtomicWrite(path string, b []byte) error {
 		return err
 	}
 	return os.Rename(f.Name(), path)
+}
+
+// Environment prefers Tala's settings and accepts the previous Kian names.
+func Environment(name string) string {
+	if value, ok := os.LookupEnv("TALA_" + name); ok {
+		return value
+	}
+	return os.Getenv("KIAN_" + name)
 }

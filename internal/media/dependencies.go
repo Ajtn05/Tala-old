@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -65,6 +66,12 @@ func installCommand(names []string) string {
 		if !found {
 			packages = append(packages, pkg)
 		}
+	}
+	return packageInstallCommand(runtime.GOOS, packages)
+}
+func packageInstallCommand(platform string, packages []string) string {
+	if platform == "linux" {
+		return "sudo apt install " + strings.Join(packages, " ") + " (Debian/Ubuntu; use your distribution's package manager elsewhere)"
 	}
 	return "brew install " + strings.Join(packages, " ")
 }

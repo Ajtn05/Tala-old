@@ -9,6 +9,7 @@ third_party/portaudio_static/
 models/*.bin
 
 # Generated binaries, distributions, and disposable verification data
+/tala
 /kian
 /kian_fullstatic
 audiotest

@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"kian/internal/config"
+	"tala/internal/config"
 )
 
 func newTestTapCapturer(sampleRate float64, channels int, silThresh float64, silenceSec float64, maxSec float64) *tapCapturer {

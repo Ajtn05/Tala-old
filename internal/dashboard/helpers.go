@@ -1,9 +1,11 @@
+//go:build darwin
+
 package dashboard
 
 import (
 	"context"
-	"kian/internal/audio"
-	"kian/internal/media"
+	"tala/internal/audio"
+	"tala/internal/media"
 	"time"
 )
 

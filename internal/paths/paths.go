@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"kian/internal/config"
+	"tala/internal/config"
 )
 
 // ResolveForBundle returns the model path and output directory, adjusted for

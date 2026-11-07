@@ -3,12 +3,12 @@ package app
 import (
 	"context"
 	"encoding/json"
-	"kian/internal/audio"
-	"kian/internal/models"
-	"kian/internal/session"
 	"os"
 	"path/filepath"
 	"sync"
+	"tala/internal/audio"
+	"tala/internal/models"
+	"tala/internal/session"
 	"testing"
 	"time"
 )
@@ -40,6 +40,55 @@ func TestRecordingSourceSynchronization(t *testing.T) {
 	}
 	if c.Start() == nil {
 		t.Fatal("second recording was accepted")
+	}
+}
+func TestMenuBarPreferenceWithoutModelAndWhileRecording(t *testing.T) {
+	t.Setenv("TALA_DATA_DIR", t.TempDir())
+	c := controller(t)
+	c.Models = models.Manager{}
+	want := models.Settings{Language: "auto", Prompt: "Ateneo", ModelDir: "/existing/models"}
+	if err := c.Models.Save(want); err != nil {
+		t.Fatal(err)
+	}
+	c.live.Active = true
+	if err := c.SetMenuBarIcon(true); err != nil {
+		t.Fatal(err)
+	}
+	want.MenuBarIcon = true
+	if got := c.Models.Settings(); got != want {
+		t.Fatalf("other settings changed: %+v", got)
+	}
+	if err := c.SetMenuBarIcon(false); err != nil {
+		t.Fatal(err)
+	}
+	if c.Models.Settings().MenuBarIcon {
+		t.Fatal("icon was not disabled")
+	}
+}
+func TestHeadlessLeavesEarlierWaitingJobsAlone(t *testing.T) {
+	t.Setenv("TALA_DATA_DIR", t.TempDir())
+	dir := t.TempDir()
+	jobs := []Job{{ID: "previous", State: "waiting", Source: "/do/not/open.wav", Kind: "file"}}
+	b, _ := json.Marshal(jobs)
+	if err := os.WriteFile(filepath.Join(dir, "queue.json"), b, 0600); err != nil {
+		t.Fatal(err)
+	}
+	settings := models.Settings{Language: "tl", Prompt: "barangay"}
+	manager := models.Manager{Home: t.TempDir(), WorkingDir: t.TempDir(), Exe: "/nonexistent/tala"}
+	c, err := newControllerWithOptions(dir, manager, &settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Closing waits for the worker, including the initial wake-up checkpoint.
+	c.Close()
+	if got := c.Jobs(); len(got) != 1 || got[0].State != "waiting" {
+		t.Fatalf("headless run consumed earlier queue: %+v", got)
+	}
+	if got := c.recognitionSettings(); got.Prompt != "barangay" || got.Language != "tl" {
+		t.Fatal("invocation overrides were ignored")
+	}
+	if got := manager.Settings(); got.Prompt != "" || got.Language != "auto" {
+		t.Fatal("invocation overrides changed saved settings")
 	}
 }
 func TestBatchWaitsForLiveAndResumes(t *testing.T) {

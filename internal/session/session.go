@@ -17,7 +17,7 @@ import (
 	"sync"
 	"time"
 
-	"kian/internal/models"
+	"tala/internal/models"
 )
 
 type Segment struct {
@@ -286,6 +286,16 @@ func Export(v Session, format, mode string) (string, error) {
 	}
 	if format != "txt" && format != "md" && !sub {
 		return "", errors.New("unsupported export format")
+	}
+	if mode == "continuous" && !sub {
+		var parts []string
+		for _, seg := range v.Segments {
+			if text := strings.Join(strings.Fields(Text(v, seg)), " "); text != "" {
+				parts = append(parts, text)
+			}
+		}
+		b.WriteString(strings.Join(parts, " "))
+		return b.String(), nil
 	}
 	for i, seg := range v.Segments {
 		text := Text(v, seg)

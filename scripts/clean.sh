@@ -3,7 +3,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-for RELATIVE_PATH in kian kian_fullstatic dist/previous-builds .verification .gocache .tools/npm-cache; do
+for RELATIVE_PATH in tala kian kian_fullstatic 'dist/Kian Studio.app' dist/Kian-Studio.dmg dist/previous-builds .verification .gocache .tools/npm-cache; do
     TARGET="$ROOT_DIR/$RELATIVE_PATH"
     if [[ -L "$TARGET" ]]; then
         echo "Preserved symlink: $RELATIVE_PATH"

@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -12,7 +13,7 @@ func TestCandidatesIncludeConfiguredAndOriginal(t *testing.T) {
 	t.Setenv("KIAN_DATA_DIR", t.TempDir())
 	t.Setenv("KIAN_MODEL_PATH", "/external/model.bin")
 	t.Setenv("KIAN_MODEL_DIR", "/external/models")
-	m := Manager{Home: "/Users/test", Exe: "/Applications/Kian Studio.app/Contents/MacOS/kian", WorkingDir: "/workspace"}
+	m := Manager{Home: "/Users/test", Exe: "/Applications/Tala.app/Contents/MacOS/kian", WorkingDir: "/workspace"}
 	paths := m.Candidates(Settings{ModelPath: "~/my-model.bin", ModelDir: "/configured"})
 	joined := strings.Join(paths, "\n")
 	for _, p := range []string{"/external/model.bin", "/external/models/" + Name, "/Users/test/my-model.bin", "/configured/" + Name, "/Users/test/Applications/Kian.app/Contents/Resources/models/" + Name, "/Applications/Kian.app/Contents/Resources/models/" + Name} {
@@ -72,7 +73,10 @@ func TestEnsureWithoutDownloadPreservesAllFiles(t *testing.T) {
 func TestSettingsSurviveNewManager(t *testing.T) {
 	t.Setenv("KIAN_DATA_DIR", t.TempDir())
 	m := Manager{}
-	want := Settings{ModelPath: "/original/Kian.app/model.bin", ModelDir: "/models", Language: "auto", Prompt: "Taglish"}
+	if m.Settings().MenuBarIcon {
+		t.Fatal("menu bar icon must default to off")
+	}
+	want := Settings{ModelPath: "/original/Kian.app/model.bin", ModelDir: "/models", Language: "auto", Prompt: "Taglish", MenuBarIcon: true}
 	if e := m.Save(want); e != nil {
 		t.Fatal(e)
 	}
@@ -80,10 +84,33 @@ func TestSettingsSurviveNewManager(t *testing.T) {
 		t.Fatalf("got %+v", got)
 	}
 }
+func TestLinuxXDGPaths(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("Linux platform defaults")
+	}
+	t.Setenv("TALA_DATA_DIR", "")
+	t.Setenv("KIAN_DATA_DIR", "")
+	t.Setenv("TALA_OUTPUT_DIR", "")
+	t.Setenv("KIAN_OUTPUT_DIR", "")
+	t.Setenv("XDG_DATA_HOME", "/xdg/data")
+	t.Setenv("XDG_CONFIG_HOME", "/xdg/config")
+	m := Manager{Home: "/home/test"}
+	if m.Root() != "/xdg/data/tala" || m.ConfigPath() != "/xdg/config/tala/settings.json" || m.OutputDir() != "/xdg/data/tala/transcripts" {
+		t.Fatalf("wrong XDG paths: %s %s %s", m.Root(), m.ConfigPath(), m.OutputDir())
+	}
+	t.Setenv("XDG_DATA_HOME", "relative/is/invalid")
+	if m.Root() != "/home/test/.local/share/tala" {
+		t.Fatal("relative XDG path was accepted")
+	}
+	t.Setenv("TALA_DATA_DIR", "/isolated")
+	if m.ConfigPath() != "/isolated/settings.json" {
+		t.Fatal("data override did not isolate settings")
+	}
+}
 func TestInstalledModelIntegration(t *testing.T) {
-	path := os.Getenv("KIAN_TEST_MODEL")
+	path := Environment("TEST_MODEL")
 	if path == "" {
-		t.Skip("set KIAN_TEST_MODEL for a full checksum and reuse integration test")
+		t.Skip("set TALA_TEST_MODEL for a full checksum and reuse integration test")
 	}
 	t.Setenv("KIAN_MODEL_PATH", path)
 	m := Default()
@@ -101,5 +128,36 @@ func TestInstalledModelIntegration(t *testing.T) {
 	after, _ := os.Stat(path)
 	if before.Size() != after.Size() || !before.ModTime().Equal(after.ModTime()) {
 		t.Fatal("model was changed")
+	}
+}
+
+func TestTalaEnvironmentOverridesLegacyWithoutChangingStorage(t *testing.T) {
+	t.Setenv("KIAN_MODEL_PATH", "/legacy/model.bin")
+	t.Setenv("TALA_MODEL_PATH", "/current/model.bin")
+	paths := (Manager{Home: "/Users/test", Exe: "/tools/tala", WorkingDir: "/workspace"}).Candidates(Settings{})
+	if len(paths) < 2 || paths[0] != "/current/model.bin" || paths[1] != "/legacy/model.bin" {
+		t.Fatal("model discovery did not preserve both overrides in priority order")
+	}
+	if Environment("MODEL_PATH") != "/current/model.bin" {
+		t.Fatal("Tala override did not win")
+	}
+	t.Setenv("KIAN_DATA_DIR", "/legacy/data")
+	t.Setenv("TALA_DATA_DIR", "/isolated/tala")
+	if (Manager{Home: "/Users/test"}).Root() != "/isolated/tala" {
+		t.Fatal("Tala data override was ignored")
+	}
+}
+func TestLegacyDataDirectoryStillWorks(t *testing.T) {
+	t.Setenv("KIAN_DATA_DIR", t.TempDir())
+	t.Setenv("KIAN_MODEL_PATH", "/legacy/model.bin")
+	// These tests run without Tala overrides so old settings keep their meaning.
+	if _, set := os.LookupEnv("TALA_DATA_DIR"); set {
+		t.Skip("TALA_DATA_DIR explicitly overrides legacy data")
+	}
+	if (Manager{}).Root() != os.Getenv("KIAN_DATA_DIR") {
+		t.Fatal("legacy data directory changed")
+	}
+	if _, set := os.LookupEnv("TALA_MODEL_PATH"); !set && Environment("MODEL_PATH") != "/legacy/model.bin" {
+		t.Fatal("legacy model override was lost")
 	}
 }

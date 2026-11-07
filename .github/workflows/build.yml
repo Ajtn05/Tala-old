@@ -16,6 +16,39 @@ on:
       - "WHISPER_VERSION"
 
 jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+      - name: Install Linux build and media dependencies
+        run: sudo apt-get update && sudo apt-get install -y build-essential cmake pkg-config libasound2-dev ffmpeg
+      - name: Cache native Linux builds
+        uses: actions/cache@v4
+        with:
+          path: |
+            third_party/whisper.cpp/build
+            third_party/portaudio/build
+          key: native-linux-${{ runner.arch }}-${{ hashFiles('WHISPER_VERSION', 'scripts/setup-deps.sh') }}
+      - name: Build and test headless CLI
+        run: |
+          make setup
+          make test
+          make test-ui
+          make race
+          make build
+          ./tala --help
+          TALA_DATA_DIR="$RUNNER_TEMP/tala-data" ./tala --output "$RUNNER_TEMP/tala-output" --list
+      - name: Package Linux CLI
+        run: make package
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tala-linux-x86_64
+          path: dist/tala-linux-x86_64.tar.gz
   build:
     runs-on: macos-latest
     permissions:
@@ -40,7 +73,9 @@ jobs:
         run: make setup
 
       - name: Run tests
-        run: make test
+        run: |
+          make test
+          make test-ui
 
       - name: Build DMG
         run: bash scripts/package.sh
@@ -63,6 +98,6 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.tag }}
-          name: Kian Studio ${{ steps.version.outputs.tag }}
-          files: dist/Kian-Studio.dmg
+          name: Tala ${{ steps.version.outputs.tag }}
+          files: dist/Tala.dmg
           generate_release_notes: true

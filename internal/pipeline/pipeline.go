@@ -11,10 +11,10 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"kian/internal/audio"
-	"kian/internal/config"
-	"kian/internal/paths"
-	"kian/internal/transcriber"
+	"tala/internal/audio"
+	"tala/internal/config"
+	"tala/internal/paths"
+	"tala/internal/transcriber"
 )
 
 type Config struct {
