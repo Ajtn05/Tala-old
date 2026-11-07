@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; connect-src 'none'"
+    />
+    <title>Kian Studio</title>
+    <style>
+      /*STYLE*/
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <aside aria-label="Navigation">
+        <div class="brand">
+          <span class="mark" aria-hidden="true"
+            ><i></i><i></i><i></i><i></i><i></i></span
+          >Kian <span class="edition">Studio</span>
+        </div>
+        <button class="new-button" data-nav="new">
+          <span aria-hidden="true">＋</span> New transcription <kbd>⌘ N</kbd>
+        </button>
+        <nav>
+          <button data-nav="live">
+            <span class="nav-icon" aria-hidden="true">◉</span>Live
+            transcription<span id="live-dot"></span></button
+          ><button data-nav="import">
+            <span class="nav-icon" aria-hidden="true">↥</span>Import media</button
+          ><button data-nav="queue">
+            <span class="nav-icon" aria-hidden="true">☷</span>Processing
+            queue<span id="queue-count" class="count"></span>
+          </button>
+        </nav>
+        <div class="sidebar-heading">
+          <span>Sessions</span
+          ><button
+            id="all-history"
+            class="icon-button"
+            aria-label="View all sessions"
+          >
+            ⌕
+          </button>
+        </div>
+        <div id="recent" class="recent"></div>
+        <div class="sidebar-bottom">
+          <button data-nav="settings">
+            <span class="nav-icon" aria-hidden="true">⚙</span>Settings<span
+              id="model-dot"
+              class="status-dot"
+            ></span>
+          </button>
+          <div class="local-note">
+            <span aria-hidden="true">⌁</span> Transcribed on your Mac
+          </div>
+        </div>
+      </aside>
+      <main>
+        <header>
+          <div id="breadcrumb">Workspace</div>
+          <div class="header-actions">
+            <span id="activity"></span
+            ><button
+              id="pin"
+              class="icon-button"
+              title="Always on top"
+              aria-label="Always on top"
+              aria-pressed="false"
+            >
+              ♧
+            </button>
+          </div>
+        </header>
+        <div id="content" tabindex="-1"></div>
+      </main>
+    </div>
+    <div id="toast" role="status" aria-live="polite"></div>
+    <div id="error" role="alert" hidden>
+      <span></span><button aria-label="Dismiss error">×</button>
+    </div>
+    <script>
+      window.onerror = function (message, source, line, col) {
+        document.getElementById("error").hidden = false;
+        document.querySelector("#error span").textContent =
+          String(message) + " at " + line + ":" + col;
+      };
+    </script>
+    <script>
+      /*SCRIPT*/
+    </script>
+  </body>
+</html>

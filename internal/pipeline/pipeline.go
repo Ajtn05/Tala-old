@@ -18,6 +18,7 @@ import (
 )
 
 type Config struct {
+	drainContext     context.Context
 	AudioMode        audio.Mode
 	ModelPath        string
 	Language         string
@@ -25,6 +26,11 @@ type Config struct {
 	Threads          int
 	DeviceSampleRate float64
 	OnSegment        func(line string)
+	OnFinalSegment   func(transcriber.Segment) error
+	OnOutputPath     func(string) error
+	Engine           interface {
+		Transcribe(context.Context, []float32) ([]transcriber.Segment, error)
+	}
 
 	SilenceFlushSec  float64
 	SilenceThreshold float64
@@ -40,45 +46,57 @@ func (c Config) silenceFlush() time.Duration {
 }
 
 func Run(ctx context.Context, cfg Config) error {
-	trans, err := transcriber.New(transcriber.Config{
-		ModelPath: cfg.ModelPath,
-		Language:  cfg.Language,
-		Threads:   cfg.Threads,
-	})
-	if err != nil {
-		return fmt.Errorf("init transcriber: %w", err)
+	trans := cfg.Engine
+	if trans == nil {
+		owned, err := transcriber.New(transcriber.Config{ModelPath: cfg.ModelPath, Language: cfg.Language, Threads: cfg.Threads})
+		if err != nil {
+			return fmt.Errorf("init transcriber: %w", err)
+		}
+		defer owned.Close()
+		trans = owned
 	}
-	defer trans.Close()
 
 	output, cleanup, err := createOutput(cfg.OutputDir)
 	if err != nil {
 		return err
 	}
 	defer cleanup()
+	if cfg.OnOutputPath != nil {
+		if f, ok := output.(*os.File); ok {
+			if err := cfg.OnOutputPath(f.Name()); err != nil {
+				return err
+			}
+		}
+	}
 
 	chunks := make(chan audio.Chunk, 3)
 	segments := make(chan transcriber.Segment, 10)
 
-	g, gctx := errgroup.WithContext(ctx)
+	// Stop capture immediately, then drain finalized audio through the same engine.
+	captureCtx, captureCancel := context.WithCancel(ctx)
+	defer captureCancel()
+	g, gctx := errgroup.WithContext(context.WithoutCancel(ctx))
+	cfg.drainContext = gctx
+	go func() { <-gctx.Done(); captureCancel() }()
 
 	switch cfg.AudioMode {
 	case audio.ModeMicrophone:
 		g.Go(func() error {
 			defer close(chunks)
-			return captureMicrophone(gctx, cfg, chunks, nil)
+			return captureMicrophone(captureCtx, cfg, chunks, nil)
 		})
 
 	case audio.ModeSystem:
 		g.Go(func() error {
 			defer close(chunks)
-			return captureSystemAudio(gctx, cfg, chunks, nil)
+			return captureSystemAudio(captureCtx, cfg, chunks, nil)
 		})
 
 	case audio.ModeBoth:
 		tapActive := &audio.TapActive{}
 		g.Go(func() error {
 			defer close(chunks)
-			inner, innerCtx := errgroup.WithContext(gctx)
+			inner, innerCtx := errgroup.WithContext(captureCtx)
 			inner.Go(func() error {
 				return captureSystemAudio(innerCtx, cfg, chunks, tapActive)
 			})
@@ -91,7 +109,7 @@ func Run(ctx context.Context, cfg Config) error {
 
 	g.Go(func() error {
 		defer close(segments)
-		return transcribeChunks(gctx, trans, chunks, segments)
+		return transcribeChunksFunc(gctx, trans.Transcribe, chunks, segments)
 	})
 	g.Go(func() error {
 		return writeSegments(cfg, output, segments)
@@ -107,6 +125,7 @@ func captureMicrophone(ctx context.Context, cfg Config, chunks chan<- audio.Chun
 	}
 
 	return audio.Capture(ctx, audio.CaptureConfig{
+		DrainContext:     cfg.drainContext,
 		Device:           device,
 		SampleRate:       cfg.DeviceSampleRate,
 		SourceLabel:      config.LabelMicrophone,
@@ -130,6 +149,7 @@ func captureSystemAudio(ctx context.Context, cfg Config, chunks chan<- audio.Chu
 	defer tapDev.StopIO()
 
 	return audio.CaptureTap(ctx, tapDev, audio.TapCaptureConfig{
+		DrainContext:     cfg.drainContext,
 		SampleRate:       cfg.DeviceSampleRate,
 		SilenceThreshold: cfg.SilenceThreshold,
 		SilenceDuration:  cfg.SilenceDuration,
@@ -182,6 +202,11 @@ func writeSegments(cfg Config, output io.Writer, segments <-chan transcriber.Seg
 		case seg, ok := <-segments:
 			if !ok {
 				return flushPending(cfg, output, &pending)
+			}
+			if cfg.OnFinalSegment != nil {
+				if err := cfg.OnFinalSegment(seg); err != nil {
+					return err
+				}
 			}
 			if pending != nil && pending.source != seg.Source {
 				if err := flushPending(cfg, output, &pending); err != nil {
@@ -243,10 +268,10 @@ func createOutput(dir string) (io.Writer, func(), error) {
 		return nil, nil, fmt.Errorf("create output directory %s: %w", outDir, err)
 	}
 
-	filename := fmt.Sprintf("transcript_%s.txt", time.Now().Format("2006-01-02_15-04-05"))
+	filename := fmt.Sprintf("transcript_%s.txt", time.Now().Format("2006-01-02_15-04-05.000000000"))
 	path := filepath.Join(outDir, filename)
 
-	f, err := os.Create(path)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
 	if err != nil {
 		return nil, nil, fmt.Errorf("create output file %s: %w", path, err)
 	}

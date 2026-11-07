@@ -1,52 +1,107 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
+	"flag"
+	"fmt"
 	"io"
 	"log"
 	"os"
 	"path/filepath"
+	"syscall"
+	"time"
 
 	"github.com/gordonklaus/portaudio"
-
-	"kian/internal/config"
-	"kian/internal/paths"
-	"kian/internal/pipeline"
+	"kian/internal/app"
+	"kian/internal/dashboard"
+	"kian/internal/models"
 	"kian/internal/ui"
 )
 
 func main() {
-	modelPath, outputDir := paths.ResolveForBundle()
-	setupLogging(outputDir)
-
-	if err := portaudio.Initialize(); err != nil {
-		log.Fatalf("initialize portaudio: %v", err)
+	check := flag.Bool("check-model", false, "Discover and verify existing models without downloading")
+	ensure := flag.Bool("ensure-model", false, "Reuse a verified model; download only if none exists")
+	input := flag.String("transcribe", "", "Transcribe a local file without opening the dashboard")
+	output := flag.String("output", os.Getenv("KIAN_OUTPUT_DIR"), "Transcript directory (default ~/Documents/Kian)")
+	flag.Parse()
+	manager := models.Default()
+	if *check || *ensure {
+		status, err := manager.Ensure(context.Background(), *ensure, nil)
+		b, _ := json.MarshalIndent(status, "", "  ")
+		fmt.Println(string(b))
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
 	}
-	defer portaudio.Terminate()
-
-	cfg := pipeline.Config{
-		ModelPath: modelPath,
-		Language:  config.DefaultLanguage,
-		OutputDir: outputDir,
-		Threads:   config.DefaultThreads,
+	if *output == "" {
+		*output = filepath.Join(manager.Home, "Documents", "Kian")
 	}
-
-	app := ui.NewApp(cfg)
-	app.Run()
+	if e := os.MkdirAll(manager.Root(), 0700); e != nil {
+		log.Fatal(e)
+	}
+	lock, e := os.OpenFile(filepath.Join(manager.Root(), "studio.lock"), os.O_CREATE|os.O_RDWR, 0600)
+	if e != nil {
+		log.Fatal(e)
+	}
+	defer lock.Close()
+	if e = syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); e != nil {
+		dashboard.NotifyExisting()
+		fmt.Fprintln(os.Stderr, "Opened the existing Kian Studio dashboard.")
+		return
+	}
+	if *input == "" {
+		ui.NewLazyApp(func() (*app.Controller, error) {
+			setupLogging(*output)
+			if e := portaudio.Initialize(); e != nil {
+				log.Printf("initialize PortAudio: %v", e)
+			}
+			return app.New(*output)
+		}).Run()
+		_ = portaudio.Terminate()
+		return
+	}
+	setupLogging(*output)
+	controller, e := app.New(*output)
+	if e != nil {
+		log.Fatal(e)
+	}
+	if *input != "" {
+		for controller.ModelState().State == "checking" || controller.ModelState().State == "" {
+			time.Sleep(50 * time.Millisecond)
+		}
+		if e = controller.Add(*input, "file", false); e != nil {
+			log.Fatal(e)
+		}
+		for event := range controller.Events {
+			if event.Type == "jobs" {
+				jobs := event.Data.([]app.Job)
+				if len(jobs) > 0 {
+					j := jobs[len(jobs)-1]
+					if j.State == "completed" {
+						fmt.Println(j.SessionID)
+						controller.Close()
+						return
+					}
+					if j.State == "failed" || j.State == "cancelled" {
+						fmt.Fprintln(os.Stderr, j.Error)
+						controller.Close()
+						os.Exit(1)
+					}
+				}
+			}
+		}
+	}
 }
-
-func setupLogging(outputDir string) {
-	if outputDir == "" {
-		outputDir = config.DefaultOutputDir
-	}
-	if err := os.MkdirAll(outputDir, 0o755); err != nil {
-		log.Printf("create log directory: %v", err)
+func setupLogging(output string) {
+	if e := os.MkdirAll(output, 0700); e != nil {
+		log.Printf("create log directory: %v", e)
 		return
 	}
-	logPath := filepath.Join(outputDir, "kian.log")
-	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
-	if err != nil {
-		log.Printf("open log file: %v", err)
-		return
+	f, e := os.OpenFile(filepath.Join(output, "studio.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+	if e == nil {
+		log.SetOutput(io.MultiWriter(os.Stderr, f))
 	}
-	log.SetOutput(io.MultiWriter(os.Stderr, f))
 }

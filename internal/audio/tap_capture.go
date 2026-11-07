@@ -10,6 +10,7 @@ import (
 
 // TapCaptureConfig holds parameters for capturing from a CoreAudio process tap.
 type TapCaptureConfig struct {
+	DrainContext     context.Context
 	SampleRate       float64
 	SilenceThreshold float64
 	SilenceDuration  float64
@@ -85,7 +86,13 @@ func CaptureTap(ctx context.Context, tapDev *TapDevice, cfg TapCaptureConfig, ou
 		select {
 		case <-ctx.Done():
 			if tc.hasSpeech && len(tc.accumulator) > 0 {
-				tc.emit(ctx, out)
+				if cfg.DrainContext != nil {
+					tc.emit(cfg.DrainContext, out)
+				} else {
+					flushCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+					tc.emit(flushCtx, out)
+					cancel()
+				}
 			}
 			return nil
 		default:

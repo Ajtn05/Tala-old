@@ -47,9 +47,10 @@ type Chunk struct {
 }
 
 type CaptureConfig struct {
-	Device      *portaudio.DeviceInfo
-	SampleRate  float64
-	SourceLabel string
+	DrainContext context.Context
+	Device       *portaudio.DeviceInfo
+	SampleRate   float64
+	SourceLabel  string
 
 	FramesPerBuffer  int
 	SilenceThreshold float64
@@ -87,7 +88,8 @@ func (c CaptureConfig) maxChunkDuration() float64 {
 }
 
 type capturer struct {
-	out chan<- Chunk
+	drainContext context.Context
+	out          chan<- Chunk
 
 	sampleRate  float64
 	fpb         int
@@ -129,6 +131,7 @@ func Capture(ctx context.Context, cfg CaptureConfig, out chan<- Chunk) error {
 	defer stream.Stop()
 
 	c := &capturer{
+		drainContext:  cfg.DrainContext,
 		out:           out,
 		sampleRate:    sampleRate,
 		fpb:           fpb,
@@ -222,7 +225,13 @@ func (c *capturer) flushRemaining(ctx context.Context) {
 	if !c.hasSpeech {
 		return
 	}
-	c.emit(ctx, c.accumulator, c.startTime())
+	if c.drainContext != nil {
+		c.emit(c.drainContext, c.accumulator, c.startTime())
+		return
+	}
+	flushCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+	defer cancel()
+	c.emit(flushCtx, c.accumulator, c.startTime())
 }
 
 func (c *capturer) flushAccumulator(ctx context.Context) {

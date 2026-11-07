@@ -163,25 +163,44 @@ func TestWriteSegments_emptyChannel(t *testing.T) {
 	assert.Empty(t, buf.String())
 }
 
+type writerFunc func([]byte) (int, error)
+
+func (f writerFunc) Write(p []byte) (int, error) { return f(p) }
 func TestWriteSegments_silenceTimerFlush(t *testing.T) {
-	var buf bytes.Buffer
-	segments := make(chan transcriber.Segment, 10)
-
-	segments <- transcriber.Segment{Source: "Mic", Start: 0, End: 1 * time.Second, Text: "hello"}
-
-	cfg := Config{SilenceFlushSec: 0.05}
-
+	written := make(chan string, 1)
+	writer := writerFunc(func(p []byte) (int, error) { written <- string(p); return len(p), nil })
+	segments := make(chan transcriber.Segment, 1)
+	segments <- transcriber.Segment{Source: "Mic", End: time.Second, Text: "hello"}
 	done := make(chan error, 1)
-	go func() {
-		done <- writeSegments(cfg, &buf, segments)
-	}()
-
-	// Wait for silence timer to fire
-	time.Sleep(150 * time.Millisecond)
-	assert.Contains(t, buf.String(), "hello", "silence timer should have flushed pending segment")
-
+	go func() { done <- writeSegments(Config{SilenceFlushSec: .05}, writer, segments) }()
+	// Receiving a completed write proves the timer flushed while input was still open.
+	select {
+	case text := <-written:
+		assert.Contains(t, text, "hello")
+	case <-time.After(time.Second):
+		t.Error("silence timer did not flush")
+	}
 	close(segments)
 	require.NoError(t, <-done)
+}
+func TestFinalizedSegmentsPublishBeforeLegacyMergeFlush(t *testing.T) {
+	segments := make(chan transcriber.Segment, 1)
+	segments <- transcriber.Segment{Source: "Mic", Start: time.Second, End: 2 * time.Second, Text: "finalized"}
+	finalized := make(chan transcriber.Segment, 1)
+	done := make(chan error, 1)
+	var legacy bytes.Buffer
+	go func() {
+		done <- writeSegments(Config{SilenceFlushSec: 10, OnFinalSegment: func(s transcriber.Segment) error { finalized <- s; return nil }}, &legacy, segments)
+	}()
+	select {
+	case seg := <-finalized:
+		assert.Equal(t, "finalized", seg.Text)
+	case <-time.After(time.Second):
+		t.Error("finalized event was delayed until legacy merge")
+	}
+	close(segments)
+	require.NoError(t, <-done)
+	assert.Contains(t, legacy.String(), "finalized")
 }
 
 func TestWriteSegments_mergesTextWithSpacing(t *testing.T) {
@@ -232,7 +251,7 @@ func TestTranscribeChunks_propagatesSourceAndOffset(t *testing.T) {
 
 	chunks <- audio.Chunk{
 		Source:      "TestSource",
-		Samples:    []float32{0.1, 0.2},
+		Samples:     []float32{0.1, 0.2},
 		StartOffset: 30 * time.Second,
 	}
 	close(chunks)

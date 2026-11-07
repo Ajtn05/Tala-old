@@ -1,14 +1,24 @@
+# Native dependencies and local build tools
 third_party/whisper.cpp/
+third_party/portaudio/
 third_party/portaudio_static/
+.tools/
+.gocache/
+
+# Model assets stay outside version control
 models/*.bin
+
+# Generated binaries, distributions, and disposable verification data
 /kian
 /kian_fullstatic
 audiotest
-.DS_Store
 dist/
+*.dmg
+.verification/
 output/
 transcript.txt
+
+# Local editor and review files
+.DS_Store
 .idea/
-*.dmg
 .pr-description.md
-.gocache/

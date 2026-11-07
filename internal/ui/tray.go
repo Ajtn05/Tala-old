@@ -1,236 +1,121 @@
 package ui
 
 import (
-	"context"
-	"fmt"
-	"log"
-	"os"
-	"os/exec"
-	"strings"
-	"runtime"
-	"sync"
-
 	"github.com/energye/systray"
-
+	"kian/internal/app"
 	"kian/internal/audio"
-	"kian/internal/paths"
-	"kian/internal/pipeline"
+	"kian/internal/dashboard"
+	"log"
+	"os/exec"
 )
 
 type App struct {
-	cfg pipeline.Config
-
-	mu        sync.Mutex
-	recording bool
-	cancel    context.CancelFunc
-	done      chan struct{}
-	audioMode audio.Mode
-
-	mStart      *systray.MenuItem
-	mStop       *systray.MenuItem
-	mOpenFolder *systray.MenuItem
-	mMic        *systray.MenuItem
-	mSystem     *systray.MenuItem
+	initialize               func() (*app.Controller, error)
+	controller               *app.Controller
+	host                     *dashboard.Host
+	start, stop, mic, system *systray.MenuItem
 }
 
-func NewApp(cfg pipeline.Config) *App {
-	return &App{cfg: cfg}
-}
-
+func NewApp(c *app.Controller) *App                              { return &App{controller: c, host: dashboard.New(c)} }
+func NewLazyApp(initialize func() (*app.Controller, error)) *App { return &App{initialize: initialize} }
 func (a *App) Run() {
-	systray.Run(a.onReady, a.onExit)
+	systray.Run(func() {
+		if a.initialize != nil {
+			systray.SetTemplateIcon(iconData, iconData)
+			systray.SetTooltip("Opening Kian Studio…")
+			c, e := a.initialize()
+			if e != nil {
+				log.Printf("open workspace: %v", e)
+				item := systray.AddMenuItem("Cannot open transcript storage: "+e.Error(), "Check Documents access in Privacy & Security")
+				item.Disable()
+				quit := systray.AddMenuItem("Quit", "Quit Kian Studio")
+				quit.Click(systray.Quit)
+				return
+			}
+			a.controller = c
+			a.host = dashboard.New(c)
+		}
+		a.onReady()
+	}, a.onExit)
 }
-
 func (a *App) onReady() {
 	systray.SetTemplateIcon(iconData, iconData)
-	systray.SetTooltip("Kian")
+	systray.SetTooltip("Kian Studio")
 	systray.SetOnClick(func(menu systray.IMenu) { menu.ShowMenu() })
-
-	a.mStart = systray.AddMenuItem("▶ Start Recording", "Start audio capture and transcription")
-	a.mStart.Click(func() { a.start() })
-
-	a.mStop = systray.AddMenuItem("■ Stop Recording", "Stop audio capture")
-	a.mStop.Disable()
-	a.mStop.Click(func() { a.handleStopClick() })
-
+	open := systray.AddMenuItem("Open Dashboard", "Review transcripts, import media, and manage settings")
+	open.Click(a.host.Show)
 	systray.AddSeparator()
-
-	a.mMic = systray.AddMenuItemCheckbox("Microphone", "Capture from microphone", true)
-	a.mMic.Click(func() { a.toggleAudioSource(a.mMic) })
-
-	a.mSystem = systray.AddMenuItemCheckbox("System Audio", "Capture system audio", true)
-	a.mSystem.Click(func() { a.toggleAudioSource(a.mSystem) })
-
-	systray.AddSeparator()
-
-	a.mOpenFolder = systray.AddMenuItem("Open Output Folder", "Open the transcript output directory")
-	a.mOpenFolder.Click(func() { a.openOutputFolder() })
-
-	systray.AddSeparator()
-
-	mAbout := systray.AddMenuItem("About", "About Kian")
-	mAbout.Click(func() { showAboutDialog() })
-
-	systray.AddSeparator()
-
-	mQuit := systray.AddMenuItem("Quit", "Quit Kian")
-	mQuit.Click(func() {
-		a.stop()
-		systray.Quit()
-	})
-}
-
-func (a *App) handleStopClick() {
-	a.mu.Lock()
-	recording := a.recording
-	a.mu.Unlock()
-
-	if !recording {
-		return
-	}
-
-	a.stop()
-}
-
-func showErrorDialog(err error) {
-	exec.Command("osascript",
-		"-e", fmt.Sprintf(`set msg to "Recording stopped unexpectedly:\n\n%s"`, strings.ReplaceAll(err.Error(), `"`, `\"`)),
-		"-e", `display dialog msg buttons {"OK"} default button "OK" with title "Kian Error" with icon stop`,
-	).Start()
-}
-
-func showAboutDialog() {
-	script := `set result to button returned of (display dialog "Kian — Audio Transcription
-
-https://getkian.app" buttons {"Website", "OK"} default button "OK" with title "About Kian" with icon note)
-if result is "Website" then
-	open location "https://getkian.app"
-end if`
-	exec.Command("osascript", "-e", script).Start()
-}
-
-func (a *App) start() {
-	a.mu.Lock()
-	if a.recording {
-		a.mu.Unlock()
-		return
-	}
-	a.done = make(chan struct{})
-	a.recording = true
-	a.mu.Unlock()
-
-	a.mStart.Disable()
-	a.mStop.Enable()
-	a.mMic.Disable()
-	a.mSystem.Disable()
-	systray.SetIcon(iconRecordingData)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	a.mu.Lock()
-	a.cancel = cancel
-	a.mu.Unlock()
-
-	cfg := a.cfg
-	a.mu.Lock()
-	cfg.AudioMode = a.audioMode
-	a.mu.Unlock()
-	cfg.OnSegment = a.onSegment
-
-	go func() {
-		defer func() {
-			close(a.done)
-
-			a.mu.Lock()
-			a.recording = false
-			a.cancel = nil
-			a.mu.Unlock()
-
-			a.mStop.Disable()
-			a.mStart.Enable()
-			a.mMic.Enable()
-			a.mSystem.Enable()
-			systray.SetTemplateIcon(iconData, iconData)
-		}()
-
-		if err := pipeline.Run(ctx, cfg); err != nil {
-			log.Printf("pipeline error: %v", err)
-			showErrorDialog(err)
+	a.start = systray.AddMenuItem("Start Recording", "Record with the selected sources")
+	a.start.Click(func() {
+		if e := a.controller.Start(); e != nil {
+			a.controller.Emit("error", e.Error())
+			a.host.Show()
 		}
-	}()
-}
-
-func (a *App) stop() {
-	a.mu.Lock()
-	cancel := a.cancel
-	done := a.done
-	a.mu.Unlock()
-
-	if cancel == nil {
-		return
+	})
+	a.stop = systray.AddMenuItem("Stop Recording", "Finish and save the recording")
+	a.stop.Click(a.controller.Stop)
+	a.mic = systray.AddMenuItemCheckbox("Microphone", "Capture microphone audio", true)
+	a.mic.Click(func() { a.toggle(true) })
+	a.system = systray.AddMenuItemCheckbox("System Audio", "Capture system audio", true)
+	a.system.Click(func() { a.toggle(false) })
+	systray.AddSeparator()
+	folder := systray.AddMenuItem("Open Output Folder", "Open local transcript storage")
+	folder.Click(func() { _ = exec.Command("open", a.controller.Store.Dir).Start() })
+	systray.AddSeparator()
+	quit := systray.AddMenuItem("Quit Kian Studio", "Save and close")
+	quit.Click(func() { go func() { a.controller.Close(); systray.Quit() }() })
+	a.host.OnQuit = func() { a.controller.Close(); systray.Quit() }
+	a.host.OnEvent = func(e app.Event) {
+		if e.Type == "live" {
+			a.sync()
+		}
 	}
-
-	cancel()
-	<-done
+	a.host.Init()
+	a.sync()
 }
-
-func (a *App) toggleAudioSource(clicked *systray.MenuItem) {
-	a.mu.Lock()
-	recording := a.recording
-	a.mu.Unlock()
-
-	if recording {
-		return
-	}
-
-	mic := a.mMic.Checked()
-	sys := a.mSystem.Checked()
-	if clicked == a.mMic {
-		mic = !mic
+func (a *App) sync() {
+	v := a.controller.LiveState()
+	if v.Active {
+		a.start.Disable()
+		a.stop.Enable()
+		a.mic.Disable()
+		a.system.Disable()
+		systray.SetIcon(iconRecordingData)
 	} else {
-		sys = !sys
+		a.start.Enable()
+		a.stop.Disable()
+		a.mic.Enable()
+		a.system.Enable()
+		systray.SetTemplateIcon(iconData, iconData)
 	}
-
-	if !mic && !sys {
+	if v.Mode != audio.ModeSystem {
+		a.mic.Check()
+	} else {
+		a.mic.Uncheck()
+	}
+	if v.Mode != audio.ModeMicrophone {
+		a.system.Check()
+	} else {
+		a.system.Uncheck()
+	}
+}
+func (a *App) toggle(mic bool) {
+	v := a.controller.LiveState()
+	m, s := v.Mode != audio.ModeSystem, v.Mode != audio.ModeMicrophone
+	if mic {
+		m = !m
+	} else {
+		s = !s
+	}
+	if !m && !s {
 		return
 	}
-
-	a.mu.Lock()
-	switch {
-	case mic && sys:
-		a.audioMode = audio.ModeBoth
-	case mic:
-		a.audioMode = audio.ModeMicrophone
-	default:
-		a.audioMode = audio.ModeSystem
+	mode := audio.ModeBoth
+	if !m {
+		mode = audio.ModeSystem
+	} else if !s {
+		mode = audio.ModeMicrophone
 	}
-	a.mu.Unlock()
-
-	a.syncCheckmarks()
+	_ = a.controller.SetMode(mode)
 }
-
-func (a *App) syncCheckmarks() {
-	switch a.audioMode {
-	case audio.ModeBoth:
-		a.mMic.Check()
-		a.mSystem.Check()
-	case audio.ModeMicrophone:
-		a.mMic.Check()
-		a.mSystem.Uncheck()
-	case audio.ModeSystem:
-		a.mMic.Uncheck()
-		a.mSystem.Check()
-	}
-}
-
-func (a *App) onSegment(_ string) {}
-
-func (a *App) openOutputFolder() {
-	dir := paths.ResolveDir(a.cfg.OutputDir)
-	os.MkdirAll(dir, 0o755)
-
-	if runtime.GOOS == "darwin" {
-		exec.Command("open", dir).Run()
-	}
-}
-
 func (a *App) onExit() {}

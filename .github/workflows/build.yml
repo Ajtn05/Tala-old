@@ -28,22 +28,16 @@ jobs:
         with:
           go-version: "1.25"
 
-      - name: Install dependencies
-        run: bash scripts/setup-deps.sh --no-build
-
-      - name: Cache whisper.cpp build
-        id: cache-whisper
+      - name: Cache native builds
         uses: actions/cache@v4
         with:
-          path: third_party/whisper.cpp/build
-          key: whisper-static-build-${{ hashFiles('third_party/whisper.cpp/CMakeLists.txt') }}
+          path: |
+            third_party/whisper.cpp/build
+            third_party/portaudio/build
+          key: native-${{ runner.arch }}-${{ hashFiles('WHISPER_VERSION', 'scripts/setup-deps.sh') }}
 
-      - name: Build whisper.cpp
-        if: steps.cache-whisper.outputs.cache-hit != 'true'
-        run: |
-          cd third_party/whisper.cpp
-          cmake -B build -DGGML_METAL=ON -DBUILD_SHARED_LIBS=OFF -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0 -DCMAKE_INCLUDE_PATH="$(pwd)/ggml/include:$(pwd)/include"
-          cmake --build build --config Release -j "$(sysctl -n hw.ncpu)"
+      - name: Build pinned native dependencies
+        run: make setup
 
       - name: Run tests
         run: make test
@@ -69,6 +63,6 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.tag }}
-          name: Kian ${{ steps.version.outputs.tag }}
-          files: dist/Kian-Installer.dmg
+          name: Kian Studio ${{ steps.version.outputs.tag }}
+          files: dist/Kian-Studio.dmg
           generate_release_notes: true

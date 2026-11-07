@@ -22,12 +22,14 @@ type Config struct {
 	ModelPath string
 	Language  string
 	Threads   int
+	Prompt    string
 }
 
 type Transcriber struct {
 	model   whisper.Model
 	lang    string
 	threads int
+	prompt  string
 }
 
 func New(cfg Config) (*Transcriber, error) {
@@ -50,6 +52,7 @@ func New(cfg Config) (*Transcriber, error) {
 		model:   model,
 		lang:    lang,
 		threads: threads,
+		prompt:  cfg.Prompt,
 	}, nil
 }
 
@@ -67,6 +70,10 @@ func (t *Transcriber) Transcribe(ctx context.Context, samples []float32) ([]Segm
 		return nil, fmt.Errorf("set language %s: %w", t.lang, err)
 	}
 	wctx.SetThreads(uint(t.threads))
+	wctx.SetTranslate(false)
+	if t.prompt != "" {
+		wctx.SetInitialPrompt(t.prompt)
+	}
 
 	abort := func() bool {
 		return ctx.Err() == nil
@@ -102,3 +109,6 @@ func (t *Transcriber) Transcribe(ctx context.Context, samples []float32) ([]Segm
 func (t *Transcriber) Close() error {
 	return t.model.Close()
 }
+
+// SetOptions is called by the shared engine while holding its inference lock.
+func (t *Transcriber) SetOptions(language, prompt string) { t.lang = language; t.prompt = prompt }

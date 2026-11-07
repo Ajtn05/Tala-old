@@ -1,20 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
-
-echo "=== Kian Dev Setup ==="
-
-# Check prerequisites
-for cmd in cmake git brew; do
-    if ! command -v "$cmd" &>/dev/null; then
-        echo "Error: $cmd is required but not installed."
+ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+export PATH="$ROOT_DIR/.tools/go/bin:$PATH"
+for cmd in go cmake git pkg-config; do
+    if ! command -v "$cmd" >/dev/null; then
+        echo "Missing $cmd. Install build tools with: brew install go cmake pkg-config"
         exit 1
     fi
 done
-
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-bash "$SCRIPT_DIR/setup-deps.sh"
-
-echo ""
-echo "=== Setup complete ==="
-echo ""
-echo "Run 'make build' to build the app, or 'bash scripts/package.sh' to create the DMG."
+bash "$ROOT_DIR/scripts/setup-deps.sh"
+echo "Setup complete. No models were downloaded. Run make build."
