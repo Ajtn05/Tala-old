@@ -12,7 +12,11 @@ case "$(uname -s)" in
     Darwin)
         BUILD_JOBS="$(sysctl -n hw.ncpu)"
         PA_OPTIONS+=(-DCMAKE_OSX_DEPLOYMENT_TARGET=14.2)
-        WHISPER_OPTIONS+=(-DCMAKE_OSX_DEPLOYMENT_TARGET=14.2 -DGGML_METAL=ON)
+        WHISPER_OPTIONS+=(-DCMAKE_OSX_DEPLOYMENT_TARGET=14.2 -DGGML_METAL=ON -DGGML_NATIVE=OFF)
+        if [[ "$(uname -m)" == arm64 ]]; then
+            # Keep binaries built on newer Macs compatible with the M1 baseline.
+            WHISPER_OPTIONS+=(-DGGML_CPU_ARM_ARCH=armv8.2-a+dotprod+fp16)
+        fi
         ;;
     Linux)
         BUILD_JOBS="$(getconf _NPROCESSORS_ONLN)"
@@ -47,6 +51,9 @@ cmake -S "$PA_DIR" -B "$PA_DIR/build" -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
     -DCMAKE_BUILD_TYPE=Release "${PA_OPTIONS[@]}"
 cmake --build "$PA_DIR/build" --config Release -j "$BUILD_JOBS"
 cp "$PA_DIR/build/libportaudio.a" "$STATIC_DIR/"
+# Pinned ggml's Metal Objective-C sources do not inherit all public include
+# directories. CPATH covers Objective-C as well as C/C++ on clean CI runners.
+export CPATH="$WHISPER_DIR/ggml/include:$WHISPER_DIR/ggml/src${CPATH:+:$CPATH}"
 cmake -S "$WHISPER_DIR" -B "$WHISPER_DIR/build" -DBUILD_SHARED_LIBS=OFF \
     -DWHISPER_BUILD_TESTS=OFF -DWHISPER_BUILD_EXAMPLES=OFF -DCMAKE_BUILD_TYPE=Release "${WHISPER_OPTIONS[@]}"
 cmake --build "$WHISPER_DIR/build" --config Release -j "$BUILD_JOBS"

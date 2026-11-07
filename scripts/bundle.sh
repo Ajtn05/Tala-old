@@ -2,6 +2,11 @@
 # Build side by side with the original Kian. Never remove an application or model.
 set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+TALA_VERSION="${TALA_VERSION:-2.0.0}"
+if [[ ! "$TALA_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    echo "TALA_VERSION must use major.minor.patch, for example 2.0.0."
+    exit 1
+fi
 cd "$ROOT_DIR"
 make build
 DIST_DIR="$ROOT_DIR/dist"
@@ -13,15 +18,15 @@ BUNDLE="$STAGE/Tala.app"
 mkdir -p "$BUNDLE/Contents/MacOS" "$BUNDLE/Contents/Resources"
 cp tala "$BUNDLE/Contents/MacOS/tala"
 cp icons/AppIcon.icns "$BUNDLE/Contents/Resources/"
-cat > "$BUNDLE/Contents/Info.plist" <<'PLIST'
+cat > "$BUNDLE/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
 <key>CFBundleName</key><string>Tala</string>
 <key>CFBundleDisplayName</key><string>Tala</string>
 <key>CFBundleIdentifier</key><string>io.github.ajtn05.tala</string>
-<key>CFBundleVersion</key><string>2.0.0</string>
-<key>CFBundleShortVersionString</key><string>2.0.0</string>
+<key>CFBundleVersion</key><string>$TALA_VERSION</string>
+<key>CFBundleShortVersionString</key><string>$TALA_VERSION</string>
 <key>CFBundleExecutable</key><string>tala</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>LSMinimumSystemVersion</key><string>14.2</string>

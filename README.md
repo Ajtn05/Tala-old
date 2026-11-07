@@ -1,8 +1,22 @@
 # Tala
 
+[![Build and test](https://github.com/Ajtn05/Tala/actions/workflows/build.yml/badge.svg)](https://github.com/Ajtn05/Tala/actions/workflows/build.yml)
+
 Local transcription with a native dashboard on macOS 14.2 or later and a headless command-line interface on Linux. Record your microphone or system audio, or transcribe audio/video files and supported media URLs. Tala is free, with no accounts, subscriptions, or cloud inference. It builds on [Kian](https://github.com/viktorminko/kian) and Whisper Large v3 Turbo with Metal acceleration on macOS and CPU inference on Linux. See [Linux and command-line usage](#linux-and-command-line-usage).
 
 **Multilingual by design:** transcribe English, Filipino/Tagalog, Taglish, and other languages supported by Whisper. Automatic language detection preserves the original speech; Tala does not translate, formalize, or rewrite the transcript.
+
+## Downloads
+
+Prebuilt packages are available from the [latest release](https://github.com/Ajtn05/Tala/releases/latest).
+
+| Platform | Download | Requirements |
+| --- | --- | --- |
+| macOS app | [Tala.dmg](https://github.com/Ajtn05/Tala/releases/latest/download/Tala.dmg) | Apple Silicon (M1 or later), macOS 14.2 or later |
+| Linux CLI | [tala-linux-x86_64.tar.gz](https://github.com/Ajtn05/Tala/releases/latest/download/tala-linux-x86_64.tar.gz) | x86_64; built on Ubuntu 24.04, with compatible glibc, ALSA, C++ and OpenMP runtimes |
+| Checksums | [SHA256SUMS.txt](https://github.com/Ajtn05/Tala/releases/latest/download/SHA256SUMS.txt) | SHA-256 checksums for both packages |
+
+The downloads contain no transcription model. Reuse a compatible model or explicitly download one during setup. Intel Mac users can [build from source](#build-from-source). Linux installation and commands are [below](#linux-and-command-line-usage).
 
 ## Quickstart — no existing Kian installation needed
 
@@ -10,7 +24,7 @@ Tala works on its own. You need **macOS 14.2 or later**, an internet connection 
 
 ### 1. Install and open Tala
 
-Get `Tala.dmg` from this repository's [Releases](https://github.com/Ajtn05/Kian-Studio/releases), when a prebuilt release is available. Choose a build for your Mac's processor. If no release is listed, follow [Build from source](#build-from-source) below.
+Download [Tala.dmg](https://github.com/Ajtn05/Tala/releases/latest/download/Tala.dmg) for Apple Silicon from the [latest release](https://github.com/Ajtn05/Tala/releases/latest). For an Intel Mac, follow [Build from source](#build-from-source) below.
 
 Open the DMG, copy **Tala.app** into `~/Applications/` (create that folder in your home folder if needed), and open the installed app. You do not need Go or the development tools to run a prebuilt app.
 
@@ -70,7 +84,7 @@ Install Go 1.25+, CMake, pkg-config, Git, and Xcode Command Line Tools. If neede
 
 ```sh
 brew install go cmake pkg-config
-git clone https://github.com/Ajtn05/Kian-Studio.git Tala
+git clone https://github.com/Ajtn05/Tala.git
 cd Tala
 make setup
 make test
@@ -81,6 +95,8 @@ open 'dist/Tala.app'
 
 `make setup` builds pinned whisper.cpp v1.8.3 and PortAudio v19.7.0 statically inside `third_party/`. It does **not** download a model. The dashboard assets are embedded in the binary. The app links only macOS system libraries.
 
+Apple Silicon builds use a portable ARM baseline with Metal acceleration, so a build made on a newer Mac does not require that Mac's newer CPU instructions.
+
 `make clean` removes development binaries, archived builds in `dist/previous-builds/`, disposable `.verification/` test output, the Go build cache, and the formatter cache. It keeps the latest app and DMG, the local Go toolchain, native build dependencies, settings, transcripts outside the test directory, and installed models. A generated directory containing a `.bin` or `.gguf` model path is preserved.
 
 `bash scripts/package.sh` creates `dist/Tala.dmg`. The bundle is ad-hoc signed; it is not Developer ID signed or notarized. Normal macOS Gatekeeper approval may be required. Intel builds must be built on Intel; the generated binary matches the build machine.
@@ -88,6 +104,21 @@ open 'dist/Tala.app'
 ## Linux and command-line usage
 
 Linux supports headless file/URL transcription, microphone recording through PortAudio/ALSA, saved-session listing, and TXT/Markdown/SRT/VTT/JSON exports. The AppKit dashboard, menu bar, and CoreAudio system-audio taps require macOS. Linux currently uses CPU inference; there is no Linux desktop UI or CUDA setup in this build.
+
+### Install the prebuilt Linux CLI
+
+Download [tala-linux-x86_64.tar.gz](https://github.com/Ajtn05/Tala/releases/latest/download/tala-linux-x86_64.tar.gz) from the [latest release](https://github.com/Ajtn05/Tala/releases/latest). Extract it and prepare the model:
+
+```sh
+tar -xzf tala-linux-x86_64.tar.gz
+./tala --help
+./tala --ensure-model
+./tala --transcribe lecture.mp4
+```
+
+The package is built and tested on Ubuntu 24.04 x86_64. Install compatible ALSA, C++ and OpenMP runtime libraries through your distribution if needed. File imports require FFmpeg and ffprobe; URL imports also require yt-dlp. Go and CMake are only needed to build from source.
+
+### Build the Linux CLI from source
 
 Install Go **1.25 or later** from [Go's downloads](https://go.dev/dl/) if your distribution does not provide it. Debian/Ubuntu build prerequisites:
 
@@ -97,7 +128,7 @@ sudo apt install build-essential git cmake pkg-config libasound2-dev ffmpeg
 # Optional, for media URLs (use a current yt-dlp package):
 sudo apt install yt-dlp
 
-git clone https://github.com/Ajtn05/Kian-Studio.git Tala
+git clone https://github.com/Ajtn05/Tala.git
 cd Tala
 make setup
 make test
@@ -105,7 +136,7 @@ make build
 make package # Creates dist/tala-linux-x86_64.tar.gz on x86_64
 ```
 
-`make setup` builds the same pinned Whisper and PortAudio versions, with Metal disabled on Linux. It does not download a model. A Linux CI job is configured to build and test the CLI on Ubuntu 24.04 and upload a `tala-linux-x86_64` artifact. Linux runtime/hardware checks still require a Linux host; see the verification notes.
+`make setup` builds the same pinned Whisper and PortAudio versions, with Metal disabled on Linux. It does not download a model. Linux CI builds the native libraries, runs Go tests, race checks, UI regression tests and CLI smoke checks, and packages the CLI. Real microphone hardware still needs manual validation; see the [verification notes](docs/VERIFICATION.md).
 
 Verify an existing compatible model, or explicitly download one:
 
@@ -247,6 +278,8 @@ The `Kian` storage folder names above are intentionally retained so existing mod
 The WKWebView loads only bundled assets and uses a narrow native script bridge, without a listening HTTP server. Navigation is blocked; the content security policy prevents external assets/network calls. Transcript text is inserted as text, not HTML. Event delivery is bounded and recovers by requesting a snapshot after overflow. Slow UI delivery does not block audio capture/inference. The controller serializes GPU access, and session persistence is independent of the window lifecycle.
 
 ## Verification
+
+The [Build and test workflow](https://github.com/Ajtn05/Tala/actions/workflows/build.yml) builds and tests macOS and Linux packages on pushes to `main`, pull requests, and manual runs. Each platform uploads its package as a workflow artifact. Version tags such as `v2.0.1` publish a release with both packages and SHA-256 checksums after both platform jobs pass. The macOS bundle version matches the release tag; routine CI builds do not create releases.
 
 ```sh
 make test
