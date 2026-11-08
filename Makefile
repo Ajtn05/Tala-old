@@ -34,6 +34,7 @@ test:
 
 test-setup:
 	bash scripts/test-setup.sh
+	@if [ "$(HOST_OS)" = Darwin ]; then PATH="/usr/bin:/bin:/usr/sbin:/sbin:$$PATH" /bin/bash scripts/test-setup.sh; fi
 
 test-ui:
 	node --test internal/dashboard/tests/*.test.cjs

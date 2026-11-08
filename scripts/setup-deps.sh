@@ -31,6 +31,19 @@ case "$(uname -s)" in
     *) echo "Supported build platforms: macOS and Linux."; exit 1 ;;
 esac
 mkdir -p "$STATIC_DIR"
+# Copy only missing paths. Apple's cp -n returns failure when a file is skipped,
+# so it cannot implement this merge under set -e. Do not traverse existing links.
+copy_missing_source() {
+    local source_path="$1" target_path="$2" entry
+    if [[ ! -e "$target_path" && ! -L "$target_path" ]]; then
+        cp -R "$source_path" "$target_path"
+    elif [[ -d "$source_path" && ! -L "$source_path" && -d "$target_path" && ! -L "$target_path" ]]; then
+        for entry in "$source_path"/* "$source_path"/.[!.]* "$source_path"/..?*; do
+            [[ -e "$entry" || -L "$entry" ]] || continue
+            copy_missing_source "$entry" "$target_path/${entry##*/}"
+        done
+    fi
+}
 # A restored build-only cache creates these directories without their sources.
 # Check the source entry point, and merge a complete clone without overwriting
 # existing build artifacts, local files, or models. Publish only successful clones.
@@ -41,7 +54,7 @@ prepare_source() (
     trap 'rm -rf -- "$source_stage"' EXIT
     git clone --depth 1 --branch "$version" "$repository" "$source_stage/source"
     mkdir -p "$source_dir"
-    cp -R -n "$source_stage/source/." "$source_dir/"
+    copy_missing_source "$source_stage/source" "$source_dir"
     if [[ ! -f "$source_dir/CMakeLists.txt" ]]; then
         echo "Native source preparation failed: $source_dir/CMakeLists.txt is missing." >&2
         return 1

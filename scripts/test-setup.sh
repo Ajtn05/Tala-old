@@ -69,6 +69,7 @@ prepare_workspace() {
 for platform in Darwin Linux; do
     export TALA_SETUP_TEST_OS="$platform"
     for scenario in fresh restored-build-only; do
+        echo "Checking $platform $scenario"
         workspace="$TEST_DIR/$platform-$scenario"
         prepare_workspace "$workspace"
         if [[ "$scenario" == restored-build-only ]]; then
