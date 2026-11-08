@@ -2,6 +2,16 @@
 
 Environment: Apple Silicon M5, macOS 27.0.1, Go 1.27.3 (module supports Go 1.25+), pinned whisper.cpp v1.8.3, Metal enabled. The deployment target remains macOS 14.2.
 
+## Home layout overhaul — November 8, 2026
+
+The home screen now contains live recording controls, file and URL import review, a processing queue preview, and recent sessions in independently scrollable lists that grow with the window height. The appearance refinement moves Settings into the tabs, keeps media diagnostics in Settings, removes repeated page headings, and uses the same rounded surfaces for history, queue, and settings. Manrope is bundled locally. Six color schemes and system/light/dark appearance are saved in native preferences, along with session sort/group choices. Compact top navigation replaces the sidebar. The existing light/dark colors, native bridge, transcript viewer, and pinned export controls are retained.
+
+- `make test`, `make race`, `make test-ui` (twelve checks), `make bundle`, JavaScript syntax validation, and diff whitespace checks pass.
+- UI regression checks cover file drops and deduplication, source selection and recording requests, enqueueing reviewed files, preserving link drafts during background updates, invalid-link feedback, discarding stale metadata, session sorting/grouping (including local calendar days around midnight), preference persistence, and queue-clear confirmation. Controller tests verify durable clearing, active cancellation, preserved sessions/live recording, late worker callbacks, and rollback when persistence fails.
+- The bundled HTML/CSS/JavaScript was exercised in WebKit and Chromium with a mocked native bridge and explicitly synthetic sessions/jobs. Both appearances render at 1100 × 760; smaller layouts were checked at 680 × 480 and 390 × 844. No horizontal overflow or JavaScript errors were observed. The desktop home screen uses the available height for its queue and session lists; taller windows show more entries. Checks with 25 sessions and 12 queued imports confirmed growth, scrolling, preserved scroll positions during updates, and long-title containment.
+- Browser checks also exercise all six schemes in both appearances, font loading under the production content security policy, sorting/grouping, and queue clearing. Browser interaction checks cover URL metadata and retained-media queueing, file review/queueing, recording start/stop requests, session navigation, copy/export requests, keyboard navigation, transcript search focus, empty states, and missing model/media-tool states. These checks validate the UI and bridge requests, not real capture, downloads, or inference.
+- An isolated native preview with separate application identity and data/output directories rendered the new home screen in WKWebView. Settings navigation and Command-N worked. The existing model was verified in place and installed media tools were detected. The bundled Manrope font and new appearance controls also rendered in the native preview. Iris, Title A–Z sorting, and Source grouping remained selected after quitting and relaunching the isolated app. No recording or real import was started for this UI check.
+
 ## Automated checks
 
 - `make test`: passes all Go package tests (64 test functions; the full installed-model test is opt-in and was also run successfully).

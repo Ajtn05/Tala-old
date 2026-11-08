@@ -12,6 +12,7 @@ package dashboard
 import "C"
 import (
 	"embed"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -73,7 +74,9 @@ func (h *Host) Init() {
 	css, _ := assets.ReadFile("assets/style.css")
 	js, _ := assets.ReadFile("assets/app.js")
 	logo, _ := assets.ReadFile("assets/logo.svg")
+	font, _ := assets.ReadFile("assets/manrope.ttf")
 	page := strings.ReplaceAll(string(html), "/*STYLE*/", string(css))
+	page = strings.ReplaceAll(page, "/*FONT*/", base64.StdEncoding.EncodeToString(font))
 	page = strings.ReplaceAll(page, "/*LOGO*/", string(logo))
 	page = strings.ReplaceAll(page, "/*SCRIPT*/", "try {\n"+string(js)+"\n} catch(e) {document.getElementById('error').hidden=false;document.querySelector('#error span').textContent=String(e.stack||e);}")
 	p := str(page)
@@ -254,6 +257,8 @@ func (h *Host) dispatch(r request) (any, error) {
 			}
 		}
 		return nil, nil
+	case "clearQueue":
+		return nil, c.ClearQueue()
 	case "cancel", "retry":
 		var id string
 		_ = decode(r.Data, &id)

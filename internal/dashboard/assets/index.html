@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; connect-src 'none'"
+      content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; connect-src 'none'"
     />
     <title>Tala</title>
     <style>
@@ -14,50 +14,11 @@
   </head>
   <body>
     <div id="app">
-      <aside aria-label="Navigation">
-        <div class="brand"><span class="mark">/*LOGO*/</span>Tala</div>
-        <button class="new-button" data-nav="new">
-          <span class="nav-icon" data-icon="plus" aria-hidden="true"></span> New
-          transcription <kbd>⌘ N</kbd>
-        </button>
-        <nav>
-          <button id="active-recording" hidden>
-            <span class="nav-icon" data-icon="record" aria-hidden="true"></span
-            >Recording in progress<span id="live-dot"></span>
-          </button>
-          <button data-nav="queue">
-            <span class="nav-icon" data-icon="queue" aria-hidden="true"></span
-            >Processing queue<span id="queue-count" class="count"></span>
-          </button>
-        </nav>
-        <div class="sidebar-heading">
-          <span>Sessions</span
-          ><button
-            id="all-history"
-            class="text-button"
-            aria-label="View all sessions"
-          >
-            View all
-          </button>
-        </div>
-        <div id="recent" class="recent"></div>
-        <div class="sidebar-bottom">
-          <button data-nav="settings">
-            <span
-              class="nav-icon"
-              data-icon="settings"
-              aria-hidden="true"
-            ></span
-            >Settings<span id="model-dot" class="status-dot"></span>
-          </button>
-        </div>
-      </aside>
       <main>
-        <header>
-          <div id="breadcrumb">Workspace</div>
+        <header class="app-header">
+          <div class="brand"><span class="mark">/*LOGO*/</span>Tala</div>
           <div class="header-actions">
-            <span id="activity"></span
-            ><button
+            <button
               id="pin"
               class="pin-button"
               title="Always on top"
@@ -65,10 +26,27 @@
               aria-pressed="false"
             >
               <span class="nav-icon" data-icon="pin" aria-hidden="true"></span>
-              Keep on top
             </button>
           </div>
         </header>
+        <div class="workspace-bar">
+          <nav aria-label="Workspace">
+            <button data-nav="new" title="New transcription (⌘N)">
+              <span class="nav-icon" data-icon="plus" aria-hidden="true"></span>New transcription
+            </button>
+            <button data-nav="history">
+              <span class="nav-icon" data-icon="file" aria-hidden="true"></span>Sessions
+            </button>
+            <button data-nav="queue">
+              <span class="nav-icon" data-icon="queue" aria-hidden="true"></span>Queue<span id="queue-count" class="count"></span>
+            </button>
+            <button data-nav="settings">
+              <span class="nav-icon" data-icon="settings" aria-hidden="true"></span>Settings
+            </button>
+          </nav>
+          <button id="active-recording" hidden><span class="dot"></span>Recording<span class="recording-link"> · View transcript</span></button>
+          <span id="activity" role="status"></span>
+        </div>
         <div id="content" tabindex="-1"></div>
         <div
           id="session-tools"

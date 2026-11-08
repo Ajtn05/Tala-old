@@ -18,6 +18,7 @@ BUNDLE="$STAGE/Tala.app"
 mkdir -p "$BUNDLE/Contents/MacOS" "$BUNDLE/Contents/Resources"
 cp tala "$BUNDLE/Contents/MacOS/tala"
 cp icons/AppIcon.icns "$BUNDLE/Contents/Resources/"
+cp internal/dashboard/assets/Manrope-OFL.txt "$BUNDLE/Contents/Resources/"
 cat > "$BUNDLE/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

@@ -34,6 +34,8 @@ function icon(name) {
     pin: '<path d="m9 3 6 0-1 6 4 4v2H6v-2l4-4-1-6ZM12 15v6"/>',
     file: '<path d="M14 3H5v18h14V8l-5-5Zm0 0v5h5M8 12h8M8 16h6"/>',
     edit: '<path d="m14 5 5 5M4 20l5-1L21 7l-5-5L4 14v6Z"/>',
+    link: '<path d="M10 13a5 5 0 0 0 7 .1l3-3a5 5 0 0 0-7.1-7.1l-1.7 1.7M14 11a5 5 0 0 0-7-.1l-3 3a5 5 0 0 0 7.1 7.1l1.7-1.7"/>',
+    check: '<path d="m5 12 4 4L19 6"/>',
   };
   return `<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name] || paths.file}</svg>`;
 }
@@ -54,13 +56,49 @@ let view = "new",
   pending = new Map(),
   files = [],
   urlMeta = null,
+  urlDraft = "",
+  urlVersion = 0,
+  retainMedia = false,
+  startingRecording = false,
   mode = storage.getItem("displayMode") || "clean",
   font = Number(storage.getItem("fontSize")) || 17,
   autoScroll = true,
   pinned = false,
   historyQuery = "",
+  historySort = storage.getItem("historySort") || "newest",
+  historyGroup = storage.getItem("historyGroup") || "none",
+  historyGeneration = 0,
+  clearingQueue = false,
   sessionGeneration = 0;
+const colorSchemes = [
+  ["slate", "Slate", "The original blue", "#4779df", "#c4d6fb", "#263447"],
+  ["graphite", "Graphite", "Quiet and neutral", "#596478", "#c9cdd5", "#2c3038"],
+  ["evergreen", "Evergreen", "A little more grounded", "#23745a", "#bce0cc", "#233c33"],
+  ["iris", "Iris", "Room for imagination", "#7956c5", "#d9c6f4", "#39304c"],
+  ["tangerine", "Tangerine", "A brighter workspace", "#b34f22", "#f4d3b5", "#4b3227"],
+  ["lagoon", "Lagoon", "Fresh and focused", "#08778d", "#b8e2e8", "#203e46"],
+];
+const systemAppearance = window.matchMedia?.("(prefers-color-scheme: dark)");
+function applyAppearance() {
+  const scheme = storage.getItem("colorScheme");
+  const appearance = storage.getItem("appearance");
+  document.documentElement.dataset.scheme = colorSchemes.some(([id]) => id === scheme) ? scheme : "slate";
+  document.documentElement.dataset.appearance = appearance === "light" || appearance === "dark"
+    ? appearance : systemAppearance?.matches ? "dark" : "light";
+}
+systemAppearance?.addEventListener("change", applyAppearance);
+applyAppearance();
 const terminal = new Set(["completed", "failed", "cancelled"]);
+const jobStates = {
+  waiting: "Waiting",
+  downloading: "Downloading audio",
+  preparing: "Preparing audio",
+  transcribing: "Transcribing",
+  paused: "Paused for live recording",
+  completed: "Completed",
+  failed: "Failed",
+  cancelled: "Cancelled",
+};
 const escape = (s) =>
   String(s ?? "").replace(
     /[&<>"']/g,
@@ -140,9 +178,9 @@ window.receive = function (event) {
   }
   if (event.type === "model") {
     state.model = d;
-    sidebar();
+    syncNavigation();
     if (view === "settings") renderSettings();
-    if (view === "live" && !state.live.active) renderLive();
+    if (view === "new") renderHomeRecording();
     return;
   }
   if (event.type === "settings") {
@@ -152,17 +190,18 @@ window.receive = function (event) {
   if (event.type === "live") {
     const wasActive = state.live.active;
     state.live = d;
-    sidebar();
-    if (d.active && (!wasActive || view === "live")) {
+    syncNavigation();
+    if (d.active && !wasActive) {
       openSession(d.sessionId);
-    } else if (view === "live") renderLive();
+    } else if (view === "new") renderHomeRecording();
     if (view === "session") updateRecordingBanner();
     return;
   }
   if (event.type === "jobs") {
     state.jobs = d || [];
-    sidebar();
+    syncNavigation();
     if (view === "queue") renderQueue();
+    if (view === "new") renderHomeQueue();
     return;
   }
   if (event.type === "segment") {
@@ -225,7 +264,7 @@ window.receive = function (event) {
 function applySnapshot(s) {
   if (!s) return;
   Object.assign(state, s);
-  sidebar();
+  syncNavigation();
   if (!selected && view === "new") {
     const last = storage.getItem("selectedSession");
     if (last && state.sessions.some((s) => s.id === last)) {
@@ -239,9 +278,9 @@ async function refreshSessions() {
   try {
     const s = await rpc("snapshot");
     state.sessions = s.sessions || [];
-    sidebar();
+    syncNavigation();
     if (view === "history") renderHistory();
-    if (view === "new") renderNew();
+    if (view === "new") renderHomeSessions();
     if (view === "session") {
       const meta = state.sessions.find((s) => s.id === selected?.id);
       if (meta) {
@@ -264,52 +303,29 @@ async function refreshSessions() {
     error(e);
   }
 }
-function sidebar() {
+function syncNavigation() {
   document.querySelectorAll("[data-nav]").forEach((b) => {
-    b.classList.toggle("active", b.dataset.nav === view);
+    const active = b.dataset.nav === view || (b.dataset.nav === "history" && view === "session");
+    b.classList.toggle("active", active);
+    b.setAttribute("aria-current", active ? "page" : "false");
   });
-  $("#live-dot").classList.toggle("on", !!state.live.active);
   $("#active-recording").hidden = !state.live.active;
   $("#queue-count").textContent =
     state.jobs.filter((j) => !terminal.has(j.state)).length || "";
-  $("#model-dot").classList.toggle("ready", !!state.model.path);
-  $("#recent").innerHTML =
-    state.sessions
-      .slice(0, 20)
-      .map(
-        (s) =>
-          `<button class="${selected?.id === s.id && view === "session" ? "active" : ""}" data-session="${s.id}" title="${escape(s.title)}">${escape(s.title)}<small>${date(s.created)} · ${escape(label(s.type))}</small></button>`,
-      )
-      .join("") || '<div class="empty">No sessions.</div>';
-  $("#recent")
-    .querySelectorAll("[data-session]")
-    .forEach((b) => (b.onclick = () => openSession(b.dataset.session)));
 }
 function navigate(next) {
   sessionGeneration++;
-  view = next;
+  view = next === "import" || next === "live" ? "new" : next;
   selected = null;
-  sidebar();
+  syncNavigation();
   render();
   content.scrollTop = 0;
   content.focus({ preventScroll: true });
 }
 function render() {
-  const titles = {
-    new: "Workspace",
-    live: "New transcription › Record audio",
-    import: "New transcription › Audio, video or URL",
-    queue: "Workspace",
-    history: "Workspace",
-    settings: "Workspace",
-    session: "Session",
-  };
-  $("#breadcrumb").textContent = titles[view];
   (
     ({
       new: renderNew,
-      live: renderLive,
-      import: renderImport,
       queue: renderQueue,
       history: renderHistory,
       settings: renderSettings,
@@ -320,13 +336,13 @@ function render() {
 function page(html) {
   $("#session-tools").hidden = true;
   $("#session-tools").innerHTML = "";
-  content.innerHTML = `<div class="page">${html}</div>`;
+  content.innerHTML = `<div class="page ${view === "new" ? "home-page" : ""}">${html}</div>`;
 }
 function rows(sessions) {
   return sessions
     .map(
       (s) =>
-        `<button class="session-row" data-open="${s.id}"><span class="row-icon">${icon(s.type === "live" ? "record" : "file")}</span><span class="row-main"><strong>${escape(s.title)}</strong><small>${escape(label(s.type))} · ${duration(s.duration)}${s.status === "interrupted" ? " · Interrupted" : ""}</small></span><span class="date">${date(s.created)}</span></button>`,
+        `<button class="session-row" data-open="${s.id}" title="${escape(s.title)}"><span class="row-icon">${icon(s.type === "live" ? "record" : "file")}</span><span class="row-main"><strong>${escape(s.title)}</strong><small>${escape(label(s.type))} · ${duration(s.duration)}${s.status === "interrupted" ? " · Interrupted" : ""}</small></span><span class="date">${date(s.created)}</span></button>`,
     )
     .join("");
 }
@@ -336,42 +352,141 @@ function bindRows() {
     .forEach((b) => (b.onclick = () => openSession(b.dataset.open)));
 }
 function renderNew() {
-  page(
-    `<div class="page-intro"><h1>New transcription</h1></div>${state.live.active ? '<div class="live-notice"><span><span class="dot"></span>Recording is in progress</span><button class="text-button" id="resume-live">View transcript</button></div>' : ""}<div class="choices"><button class="choice" id="new-live"><span class="choice-symbol">${icon("record")}</span><div><h2>Record live audio</h2><p>Select microphone, system audio, or both.</p></div><span aria-hidden="true">›</span></button><button class="choice" id="new-import"><span class="choice-symbol">${icon("import")}</span><div><h2>Import audio or video</h2><p>Choose files or enter a media URL.</p></div><span aria-hidden="true">›</span></button></div><div class="section-head"><h2>Recent sessions</h2><button class="text-button" id="view-history">View all</button></div>${rows(state.sessions.slice(0, 5)) || '<div class="empty">No sessions. Record live audio or import media.</div>'}`,
-  );
-  $("#new-live").onclick = () => navigate("live");
-  $("#new-import").onclick = () => navigate("import");
+  page(`
+    <h1 class="visually-hidden">New transcription</h1>
+    <div id="home-recording"></div>
+    <div class="or-divider"><span>or bring your own media</span></div>
+    <section class="import-panel" aria-label="Import audio or video">
+      <button class="dropzone" id="choose-files">
+        <span class="upload-symbol">${icon("import")}</span>
+        <strong>Drop audio or video here</strong>
+        <span class="browse-label">or choose files</span>
+        <small>MP3, WAV, M4A, AAC, FLAC, OGG · MP4, MOV, MKV, WEBM, AVI</small>
+      </button>
+      <div id="files"></div><div id="file-actions"></div>
+      <div class="link-import">
+        <label for="media-url" class="visually-hidden">YouTube or direct media link</label>
+        <div class="url-row">
+          <span class="link-symbol">${icon("link")}</span>
+          <input id="media-url" type="url" placeholder="Paste a YouTube or direct media link" autocomplete="off" aria-describedby="url-error" value="${escape(urlDraft)}">
+          <button id="fetch-url">Fetch details</button>
+        </div>
+        <p id="url-error" class="field-error" role="alert" hidden></p>
+        <div id="url-details"></div>
+      </div>
+      <p id="import-availability" class="import-availability" hidden></p>
+    </section>
+    <div class="workspace-overview">
+      <section class="queue-preview" aria-labelledby="queue-heading">
+        <div class="section-head"><h2 id="queue-heading">Processing queue</h2><button class="text-button" id="view-queue" aria-label="View full processing queue">View all</button></div>
+        <div id="home-queue"></div>
+      </section>
+      <section class="sessions-preview" aria-labelledby="sessions-heading">
+        <div class="section-head"><h2 id="sessions-heading">Recent sessions</h2><button class="text-button" id="view-history" aria-label="View all sessions">View all</button></div>
+        <div id="home-sessions"></div>
+      </section>
+    </div>`);
+  renderHomeRecording();
+  renderHomeQueue();
+  renderHomeSessions();
+  $("#view-queue").onclick = () => navigate("queue");
   $("#view-history").onclick = () => navigate("history");
-  if ($("#resume-live"))
-    $("#resume-live").onclick = () => openSession(state.live.sessionId);
+  $("#choose-files").onclick = () => action("pickFiles");
+  $("#fetch-url").onclick = fetchURL;
+  $("#media-url").onkeydown = (e) => {
+    if (e.key === "Enter") fetchURL();
+  };
+  $("#media-url").oninput = (e) => {
+    urlDraft = e.target.value;
+    urlVersion++;
+    urlMeta = null;
+    retainMedia = false;
+    $("#url-details").innerHTML = "";
+    $("#url-error").hidden = true;
+    $("#media-url").setAttribute("aria-invalid", "false");
+    syncURLButton();
+  };
+  updateImportAvailability();
+  refreshDependencies();
+  renderFiles();
+  renderURL();
+}
+function renderHomeRecording() {
+  if (view !== "new") return;
+  const live = state.live;
+  $("#home-recording").innerHTML = `${modelNotice()}
+    <section class="record-bar" aria-label="Live transcription">
+      <div class="record-label"><span class="record-symbol ${live.active ? "is-recording" : ""}">${icon("record")}</span><h2>Live transcription</h2></div>
+      <span id="home-live-clock" class="record-clock" aria-label="Recording duration">${live.active ? clock((Date.now() - new Date(live.started)) / 1000) : "00:00"}</span>
+      <select id="audio-source" aria-label="Audio source" ${live.active || startingRecording ? "disabled" : ""}>
+        <option value="0">Microphone + system audio</option><option value="1">Microphone only</option><option value="2">System audio only</option>
+      </select>
+      ${live.active ? `<button id="home-stop-recording" class="danger" ${live.state === "stopping" ? "disabled" : ""}>${live.state === "stopping" ? "Finishing…" : "Stop recording"}</button>` : `<button id="start-recording" class="primary" ${state.model.path && !startingRecording ? "" : "disabled"}>${startingRecording ? "Starting…" : "Start recording"}</button>`}
+    </section>`;
+  $("#audio-source").value = live.mode;
+  $("#audio-source").onchange = async (e) => {
+    const control = e.target;
+    const previous = state.live.mode;
+    control.disabled = true;
+    if ($("#start-recording")) $("#start-recording").disabled = true;
+    try {
+      await rpc("mode", Number(control.value));
+      state.live.mode = Number(control.value);
+    } catch (e) {
+      control.value = previous;
+      error(e);
+    } finally {
+      renderHomeRecording();
+    }
+  };
+  if ($("#start-recording")) $("#start-recording").onclick = async () => {
+    if (startingRecording || !state.model.path) return;
+    startingRecording = true;
+    renderHomeRecording();
+    try {
+      await rpc("start");
+    } catch (e) {
+      error(e);
+    } finally {
+      startingRecording = false;
+      renderHomeRecording();
+    }
+  };
+  if ($("#home-stop-recording")) $("#home-stop-recording").onclick = async (e) => {
+    e.currentTarget.disabled = true;
+    await action("stop");
+    renderHomeRecording();
+  };
+  if ($("#open-model")) $("#open-model").onclick = () => navigate("settings");
+}
+function renderHomeQueue() {
+  if (view !== "new") return;
+  const container = $("#home-queue"), scrollTop = container.scrollTop || 0;
+  const active = state.jobs.filter((j) => !terminal.has(j.state));
+  const recent = active.length ? active : [...state.jobs].reverse();
+  container.innerHTML = recent.length
+    ? recent.map((j) => `<button class="queue-item" data-queue-job="${escape(j.id)}">
+        <strong>${escape(j.title)}</strong>
+        <span class="queue-item-meta"><span class="${j.state === "failed" ? "job-error" : ""}">${escape(jobStates[j.state] || j.state)}</span>${j.state === "transcribing" || j.state === "paused" || j.state === "completed" ? `<span>${Math.floor((j.progress || 0) * 100)}%</span>` : ""}</span>
+        ${j.state === "transcribing" || j.state === "paused" ? `<progress max="1" value="${j.progress || 0}" aria-label="${escape(j.title)} transcription progress"></progress>` : ""}
+      </button>`).join("")
+    : `<div class="queue-empty"><span class="queue-empty-icon">${icon("check")}</span><strong>Your queue is clear</strong><p>Files and links appear here while they’re transcribed.</p></div>`;
+  container.scrollTop = scrollTop;
+  container.querySelectorAll("[data-queue-job]").forEach((b) => {
+    b.onclick = () => navigate("queue");
+  });
+}
+function renderHomeSessions() {
+  if (view !== "new") return;
+  const container = $("#home-sessions"), scrollTop = container.scrollTop || 0;
+  container.innerHTML = rows(state.sessions) || `<div class="sessions-empty">${icon("file")}<div><strong>Your transcripts, all together</strong><p>Start a recording or import media above.<br>Your saved sessions will appear here.</p></div></div>`;
+  container.scrollTop = scrollTop;
   bindRows();
 }
 function modelNotice() {
   return state.model.path
     ? ""
-    : `<div class="waiting-model">${escape(state.model.state === "checking" ? "Verifying transcription model…" : "Model required. Select or download a model in Settings.")} <button class="text-button" id="open-model">Open settings</button></div>`;
-}
-function renderLive() {
-  if (state.live.active) {
-    openSession(state.live.sessionId);
-    return;
-  }
-  page(
-    `<div class="page-intro"><h1>Live transcription</h1><p>Select an audio source, then press Start recording.</p></div>${modelNotice()}<div class="record-panel"><div class="source-controls"><h3>Audio source</h3><select id="audio-source" aria-label="Audio source"><option value="0">Microphone + system audio</option><option value="1">Microphone only</option><option value="2">System audio only</option></select></div><div class="record-body"><div class="record-clock">00:00</div><p>Ready to record</p><button id="start-recording" class="primary" ${state.model.path ? "" : "disabled"}>${icon("record")} Start recording</button></div></div>`,
-  );
-  $("#audio-source").value = state.live.mode;
-  $("#audio-source").onchange = (e) => action("mode", Number(e.target.value));
-  $("#start-recording").onclick = async () => {
-    const button = $("#start-recording");
-    button.disabled = true;
-    try {
-      await rpc("start");
-    } catch (e) {
-      error(e);
-      button.disabled = false;
-    }
-  };
-  if ($("#open-model")) $("#open-model").onclick = () => navigate("settings");
+    : `<div class="waiting-model">${escape(state.model.state === "checking" ? "Verifying transcription model…" : "Choose a transcription model to get started.")} <button class="text-button" id="open-model">Open settings</button></div>`;
 }
 // Recheck after users install tools outside the app; no restart is needed.
 function renderDependencyChecks() {
@@ -403,18 +518,31 @@ function renderDependencyChecks() {
     .join("");
   container.innerHTML = `${rows}<div class="model-status">${workflows || "Checking media tools…"}<small>Live recording works without these tools.</small></div><button id="recheck-dependencies">Check again</button>`;
   $("#recheck-dependencies").onclick = () => refreshDependencies(true);
+  updateImportAvailability();
+}
+function updateImportAvailability() {
+  const report = state.dependencies;
+  if (view === "new" && $("#import-availability")) {
+    const ready = report.file?.ready && report.url?.ready;
+    $("#import-availability").hidden = !!ready;
+    $("#import-availability").innerHTML = report.file || report.url
+      ? `Some imports need media tools. <button class="text-button" id="import-settings">Set up in Settings</button>`
+      : "Checking import availability…";
+    if ($("#import-settings")) $("#import-settings").onclick = () => navigate("settings");
+  }
   if ($("#choose-files")) $("#choose-files").disabled = !report.file?.ready;
-  if ($("#fetch-url"))
-    $("#fetch-url").disabled = !report.url?.ready || !!fetchURL.pending;
+  syncURLButton();
   if ($("#enqueue-url")) $("#enqueue-url").disabled = !report.url?.ready;
 }
+
 async function refreshDependencies(retryFiles = false) {
   const button = $("#recheck-dependencies");
   if (button) button.disabled = true;
   try {
     state.dependencies = await rpc("dependencies");
-    if (view === "import" || view === "settings") renderDependencyChecks();
-    if (view === "import") {
+    if (view === "settings") renderDependencyChecks();
+    if (view === "new") updateImportAvailability();
+    if (view === "new") {
       if (retryFiles && state.dependencies.file.ready) {
         for (const file of files.filter((file) => file.error)) {
           file.pending = true;
@@ -439,15 +567,14 @@ async function refreshDependencies(retryFiles = false) {
 async function setFiles(paths) {
   if (!Array.isArray(paths) || !paths.length) return;
   sessionGeneration++;
-  view = "import";
+  view = "new";
   selected = null;
   const additions = [...new Set(paths)]
     .filter((path) => !files.some((file) => file.path === path))
     .map((path) => ({ path, pending: true }));
   files.push(...additions);
-  urlMeta = null;
   render();
-  sidebar();
+  syncNavigation();
   for (const file of additions) {
     try {
       file.meta = await rpc("probe", file.path);
@@ -455,28 +582,7 @@ async function setFiles(paths) {
       file.error = e.message;
     }
     file.pending = false;
-    if (view === "import") renderFiles();
-  }
-}
-function renderImport() {
-  page(
-    `<div class="page-intro"><h1>Import media</h1><p>Choose files or enter a URL, then add them to the queue.</p></div><button class="dropzone" id="choose-files">${icon("import")}<strong>Choose audio or video files</strong><small>Files can also be dropped into this window.</small></button><div class="format-hint">MP3, WAV, M4A, AAC, FLAC, OGG · MP4, MOV, MKV, WEBM, AVI</div><div id="files"></div><div id="file-actions"></div><div class="or-divider">or import a link</div><label for="media-url">Media URL</label><div class="url-row"><input id="media-url" type="url" placeholder="Paste a YouTube or direct media link" autocomplete="off"><button id="fetch-url">Fetch details</button></div><small>YouTube, Shorts, and accessible sites supported by yt-dlp. One video per link.</small><div id="url-details"></div><details class="tool-details" ${state.dependencies.file?.ready && state.dependencies.url?.ready ? "" : "open"}><summary>Media tools</summary><div id="dependency-checks" aria-live="polite"></div></details>`,
-  );
-  $("#choose-files").onclick = () => action("pickFiles");
-  $("#fetch-url").onclick = fetchURL;
-  $("#media-url").onkeydown = (e) => {
-    if (e.key === "Enter") fetchURL();
-  };
-  $("#media-url").oninput = () => {
-    urlMeta = null;
-    $("#url-details").innerHTML = "";
-  };
-  renderDependencyChecks();
-  refreshDependencies();
-  renderFiles();
-  if (urlMeta) {
-    $("#media-url").value = urlMeta.url;
-    renderURL();
+    if (view === "new") renderFiles();
   }
 }
 function renderFiles() {
@@ -518,28 +624,41 @@ function renderFiles() {
 }
 async function fetchURL() {
   if (!state.dependencies.url?.ready || fetchURL.pending) return;
+  const raw = $("#media-url").value.trim();
+  if (!raw) return;
+  if (!/^https?:\/\/\S+$/i.test(raw)) {
+    $("#url-error").textContent = "Enter a full link starting with https:// or http://.";
+    $("#url-error").hidden = false;
+    $("#media-url").setAttribute("aria-invalid", "true");
+    $("#media-url").focus();
+    return;
+  }
+  const version = urlVersion;
   fetchURL.pending = true;
-  const raw = $("#media-url").value.trim(),
-    button = $("#fetch-url");
-  button.disabled = true;
-  button.textContent = "Fetching…";
+  syncURLButton();
   try {
-    urlMeta = await rpc("metadata", raw);
-    if (view === "import") renderURL();
+    const result = await rpc("metadata", raw);
+    if (version !== urlVersion) return;
+    urlMeta = result;
+    if (view === "new") renderURL();
   } catch (e) {
-    error(e);
+    if (version === urlVersion) error(e);
   } finally {
     fetchURL.pending = false;
-    if ($("#fetch-url")) {
-      $("#fetch-url").disabled = !state.dependencies.url?.ready;
-      $("#fetch-url").textContent = "Fetch details";
-    }
+    syncURLButton();
   }
+}
+function syncURLButton() {
+  const button = $("#fetch-url");
+  if (!button) return;
+  button.disabled = !state.dependencies.url?.ready || !!fetchURL.pending || !urlDraft.trim();
+  button.textContent = fetchURL.pending ? "Fetching…" : "Fetch details";
 }
 function renderURL() {
   if (!urlMeta || !$("#url-details")) return;
   $("#url-details").innerHTML =
-    `<div class="metadata"><h3>${escape(urlMeta.title)}</h3><small>${duration(urlMeta.duration)}</small></div><div class="import-actions"><label><input id="retain-media" type="checkbox">Keep downloaded media for playback</label><button class="primary" id="enqueue-url" ${state.dependencies.url?.ready ? "" : "disabled"}>Add to queue</button></div>`;
+    `<div class="metadata"><h3>${escape(urlMeta.title)}</h3><small>${duration(urlMeta.duration)}</small></div><div class="import-actions"><label><input id="retain-media" type="checkbox" ${retainMedia ? "checked" : ""}>Keep downloaded media for playback</label><button class="primary" id="enqueue-url" ${state.dependencies.url?.ready ? "" : "disabled"}>Add to queue</button></div>`;
+  $("#retain-media").onchange = (e) => (retainMedia = e.target.checked);
   $("#enqueue-url").onclick = async () => {
     const b = $("#enqueue-url");
     b.disabled = true;
@@ -550,6 +669,9 @@ function renderURL() {
         retain: $("#retain-media").checked,
       });
       urlMeta = null;
+      urlDraft = "";
+      urlVersion++;
+      retainMedia = false;
       navigate("queue");
     } catch (e) {
       error(e);
@@ -558,54 +680,120 @@ function renderURL() {
   };
 }
 function renderQueue() {
-  const states = {
-    waiting: "Waiting",
-    downloading: "Downloading audio",
-    preparing: "Preparing audio",
-    transcribing: "Transcribing",
-    paused: "Paused for live recording",
-    completed: "Completed",
-    failed: "Failed",
-    cancelled: "Cancelled",
-  };
-  page(
-    `<div class="page-intro"><h1>Processing queue</h1><p>Files process sequentially. Imports pause during live recording.</p></div>${state.jobs.length ? state.jobs.map((j) => `<div class="job"><div class="job-head"><div><h3>${escape(j.title)}</h3><small>${escape(states[j.state] || j.state)} · ${duration(j.duration)}</small></div><div class="controls">${j.sessionId ? `<button data-open="${j.sessionId}">Open transcript</button>` : ""}${!terminal.has(j.state) ? `<button data-cancel="${j.id}">Cancel</button>` : j.state !== "completed" ? `<button data-retry="${j.id}">Retry</button>` : ""}</div></div>${j.state === "transcribing" || j.state === "paused" || j.state === "completed" ? `<div class="job-progress"><progress max="1" value="${j.progress}" aria-label="Transcription progress"></progress><span>${Math.floor(j.progress * 100)}%</span></div><small>${clock(j.processed)} of audio processed · ${clock(j.elapsed)} elapsed</small>` : ""}${j.error ? `<p class="job-error">${escape(j.error)}</p>` : ""}</div>`).join("") : '<div class="empty">No queued files.<br><button class="text-button" id="queue-import">Import audio, video, or a link</button></div>'}`,
-  );
+  const active = state.jobs.filter((j) => !terminal.has(j.state)).length;
+  page(`<h1 class="visually-hidden">Processing queue</h1>
+    <section class="collection-panel" aria-label="Processing queue">
+      <div class="collection-toolbar"><span class="collection-count">${active ? `${active} in progress or waiting` : `${state.jobs.length} finished import${state.jobs.length === 1 ? "" : "s"}`}</span><button id="clear-queue" ${!state.jobs.length || clearingQueue ? "disabled" : ""}>${clearingQueue ? "Clearing…" : "Clear queue"}</button></div>
+      <div class="queue-list">${state.jobs.length ? state.jobs.map((j) => `
+        <article class="job">
+          <div class="job-head"><span class="job-symbol">${icon(j.kind === "url" ? "link" : "file")}</span><div class="job-title"><h2>${escape(j.title)}</h2><span class="job-status" data-state="${escape(j.state)}">${escape(jobStates[j.state] || j.state)}</span><small>${duration(j.duration)}</small></div>
+            <div class="controls">${j.sessionId ? `<button data-open="${j.sessionId}">Open transcript</button>` : ""}${!terminal.has(j.state) ? `<button data-cancel="${j.id}">Cancel</button>` : j.state !== "completed" ? `<button data-retry="${j.id}">Retry</button>` : ""}</div>
+          </div>
+          ${j.state === "transcribing" || j.state === "paused" || j.state === "completed" ? `<div class="job-progress"><progress max="1" value="${j.progress || 0}" aria-label="Transcription progress"></progress><span>${Math.floor((j.progress || 0) * 100)}%</span></div><small class="job-timing">${clock(j.processed)} processed · ${clock(j.elapsed)} elapsed</small>` : ""}
+          ${j.error ? `<p class="job-error">${escape(j.error)}</p>` : ""}
+        </article>`).join("") : `<div class="collection-empty"><span>${icon("queue")}</span><h2>Your queue is clear</h2><p>Import audio, video, or a link to get started.</p><button id="queue-import" class="primary">New transcription</button></div>`}</div>
+    </section><p class="page-footnote">Files process sequentially. Imports pause during live recording.</p>`);
   bindRows();
-  content
-    .querySelectorAll("[data-cancel]")
-    .forEach((b) => (b.onclick = () => action("cancel", b.dataset.cancel)));
-  content
-    .querySelectorAll("[data-retry]")
-    .forEach((b) => (b.onclick = () => action("retry", b.dataset.retry)));
-  if ($("#queue-import")) $("#queue-import").onclick = () => navigate("import");
+  content.querySelectorAll("[data-cancel]").forEach((b) => (b.onclick = () => action("cancel", b.dataset.cancel)));
+  content.querySelectorAll("[data-retry]").forEach((b) => (b.onclick = () => action("retry", b.dataset.retry)));
+  if ($("#queue-import")) $("#queue-import").onclick = () => navigate("new");
+  $("#clear-queue").onclick = clearQueue;
+}
+async function clearQueue() {
+  if (clearingQueue || !state.jobs.length) return;
+  const active = state.jobs.some((j) => !terminal.has(j.state));
+  if (active && !window.confirm("Cancel all queued and active imports and clear the queue? Saved transcripts and original media will remain available.")) return;
+  clearingQueue = true;
+  renderQueue();
+  try {
+    await rpc("clearQueue");
+    // Read the latest queue so imports added while this request ran stay visible.
+    const snapshot = await rpc("snapshot");
+    state.jobs = snapshot.jobs || [];
+    syncNavigation();
+    toast("Queue cleared");
+  } catch (e) {
+    error(e);
+  } finally {
+    clearingQueue = false;
+    if (view === "queue") renderQueue();
+    if (view === "new") renderHomeQueue();
+  }
 }
 function renderHistory() {
-  page(
-    `<div class="page-intro"><h1>Session history</h1></div><input id="history-query" type="search" class="history-search" placeholder="Search titles and transcripts" aria-label="Search session history" value="${escape(historyQuery)}"><div id="history-results"></div>`,
-  );
+  page(`<h1 class="visually-hidden">Session history</h1>
+    <section class="collection-panel" aria-label="Session history">
+      <div class="history-toolbar">
+        <input id="history-query" type="search" class="history-search" placeholder="Search titles and transcripts" aria-label="Search session history" value="${escape(historyQuery)}">
+        <label class="filter-control">Sort by<select id="history-sort"><option value="newest">Newest first</option><option value="oldest">Oldest first</option><option value="title">Title A–Z</option><option value="title-desc">Title Z–A</option><option value="longest">Longest first</option><option value="shortest">Shortest first</option></select></label>
+        <label class="filter-control">Group by<select id="history-group"><option value="none">None</option><option value="day">Day</option><option value="month">Month</option><option value="type">Source</option><option value="status">Status</option></select></label>
+      </div>
+      <div id="history-results" aria-live="polite"></div>
+    </section>`);
+  $("#history-sort").value = historySort;
+  $("#history-group").value = historyGroup;
   filterHistory();
   $("#history-query").oninput = (e) => {
     historyQuery = e.target.value;
+    historyGeneration++;
     clearTimeout(renderHistory.timer);
     renderHistory.timer = setTimeout(filterHistory, 180);
   };
+  $("#history-sort").onchange = (e) => {
+    historySort = e.target.value;
+    storage.setItem("historySort", historySort);
+    filterHistory();
+  };
+  $("#history-group").onchange = (e) => {
+    historyGroup = e.target.value;
+    storage.setItem("historyGroup", historyGroup);
+    filterHistory();
+  };
+}
+function organizeSessions(items, sort, group) {
+  const byDate = (a, b) => new Date(a.created) - new Date(b.created);
+  const byTitle = (a, b) => a.title.localeCompare(b.title, undefined, { numeric: true, sensitivity: "base" });
+  const compare = {
+    newest: (a, b) => byDate(b, a), oldest: byDate, title: byTitle,
+    "title-desc": (a, b) => byTitle(b, a),
+    longest: (a, b) => (b.duration || 0) - (a.duration || 0),
+    shortest: (a, b) => (a.duration || 0) - (b.duration || 0),
+  }[sort] || ((a, b) => byDate(b, a));
+  const sorted = [...items].sort((a, b) => compare(a, b) || byDate(b, a) || byTitle(a, b));
+  const groups = new Map();
+  const calendarGroup = group === "day" || group === "month";
+  for (const session of sorted) {
+    const created = new Date(session.created);
+    const key = calendarGroup ? `${created.getFullYear()}-${String(created.getMonth() + 1).padStart(2, "0")}${group === "day" ? `-${String(created.getDate()).padStart(2, "0")}` : ""}`
+      : group === "type" ? label(session.type)
+      : group === "status" ? ({ completed: "Completed", processing: "In progress", recording: "Recording", interrupted: "Interrupted", cancelled: "Cancelled", failed: "Failed" }[session.status] || session.status || "Other") : "";
+    if (!groups.has(key)) groups.set(key, { key, title: calendarGroup ? created.toLocaleDateString(undefined, { month: "long", ...(group === "day" ? { day: "numeric" } : {}), year: "numeric" }) : key, sessions: [] });
+    groups.get(key).sessions.push(session);
+  }
+  const result = [...groups.values()];
+  if (calendarGroup) result.sort((a, b) => sort === "oldest" ? a.key.localeCompare(b.key) : b.key.localeCompare(a.key));
+  else if (group === "type" || group === "status") result.sort((a, b) => a.title.localeCompare(b.title));
+  return result;
 }
 async function filterHistory() {
+  const generation = ++historyGeneration;
   let items = state.sessions;
   const q = historyQuery.toLowerCase().trim();
   if (q) {
     try {
       const ids = await rpc("search", q);
-      if (!$("#history-results")) return;
+      if (generation !== historyGeneration || view !== "history") return;
       items = items.filter((s) => ids.includes(s.id));
     } catch (e) {
+      if (generation !== historyGeneration || view !== "history") return;
       error(e);
+      return;
     }
   }
-  if (!$("#history-results")) return;
-  $("#history-results").innerHTML =
-    rows(items) || '<div class="empty">No matching sessions.</div>';
+  if (view !== "history" || !$("#history-results")) return;
+  $("#history-results").innerHTML = items.length
+    ? `<p class="result-count">${items.length} session${items.length === 1 ? "" : "s"}</p>` + organizeSessions(items, historySort, historyGroup).map((g) => `<section class="history-group">${g.title ? `<h2>${escape(g.title)} <span>${g.sessions.length}</span></h2>` : ""}${rows(g.sessions)}</section>`).join("")
+    : `<div class="collection-empty"><span>${icon("file")}</span><h2>${q ? "No matching sessions" : "Your transcripts, all together"}</h2><p>${q ? "Try another title or a word from your transcript." : "Start a recording or import media. Your saved sessions will appear here."}</p></div>`;
   bindRows();
 }
 async function openSession(id) {
@@ -618,9 +806,8 @@ async function openSession(id) {
     selected.corrections ??= {};
     view = "session";
     storage.setItem("selectedSession", id);
-    sidebar();
+    syncNavigation();
     renderSession();
-    $("#breadcrumb").textContent = label(session.type);
     content.scrollTop = 0;
   } catch (e) {
     error(e);
@@ -847,13 +1034,35 @@ function readSettings() {
     menuBarIcon: $("#menu-bar-icon").checked,
   };
 }
+function appearanceSettings() {
+  const selected = storage.getItem("colorScheme") || "slate";
+  return `<section class="settings-group appearance-settings"><div class="settings-section-head"><div><h2>Appearance</h2><p>Make a little room for your own style.</p></div><label class="filter-control">Appearance<select id="appearance"><option value="system">Follow system</option><option value="light">Light</option><option value="dark">Dark</option></select></label></div>
+    <div class="theme-options" role="group" aria-label="Color scheme">${colorSchemes.map(([id, name, description, a, b, c]) => `<button class="theme-option" data-scheme="${id}" aria-pressed="${id === selected}" style="--swatch-accent:${a};--swatch-soft:${b};--swatch-dark:${c}"><span class="theme-preview" aria-hidden="true"><i></i><i></i><i></i></span><span class="theme-name">${name}<span class="theme-check">${icon("check")}</span></span><small>${description}</small></button>`).join("")}</div>
+    </section>`;
+}
+function bindAppearanceSettings() {
+  $("#appearance").value = storage.getItem("appearance") || "system";
+  $("#appearance").onchange = (e) => {
+    storage.setItem("appearance", e.target.value);
+    applyAppearance();
+  };
+  content.querySelectorAll(".theme-option").forEach((b) => {
+    b.onclick = () => {
+      storage.setItem("colorScheme", b.dataset.scheme);
+      applyAppearance();
+      content.querySelectorAll(".theme-option").forEach((option) => option.setAttribute("aria-pressed", String(option === b)));
+    };
+  });
+}
 function renderSettings() {
   const m = state.model,
     s = state.settings;
   page(
-    `<div class="page-intro"><h1>Settings</h1></div><div class="settings-group"><h2>Whisper Large v3 Turbo</h2><div class="model-status"><strong>${escape({ reused: "Existing model verified", downloaded: "Model downloaded", checking: "Checking existing models…", missing: "Model required" }[m.state] || m.state)}</strong><code>${escape(m.path || m.detail || "Choose an existing model below.")}</code></div><p>Model format and SHA-256 checksum must match Whisper Large v3 Turbo.</p><label class="field"><span>Existing model path</span><input id="model-path" value="${escape(s.modelPath || m.path || "")}" placeholder="/path/to/ggml-large-v3-turbo.bin"></label><label class="field"><span>Additional model directory</span><input id="model-dir" value="${escape(s.modelDir || "")}" placeholder="Optional directory to search"></label><div class="controls"><button id="choose-model">Choose model…</button><button id="verify-model">Save and verify model</button>${m.path ? "" : '<button id="download-model">Download model (1.6 GB)</button>'}</div></div><div class="settings-group"><h2>Recognition</h2><label class="field"><span>Language</span><select id="language"><option value="auto">Automatic (English, Filipino, Taglish, other languages)</option><option value="en">English</option><option value="tl">Filipino / Tagalog</option></select></label><label class="field"><span>Vocabulary hints (optional)</span><textarea id="context-prompt" aria-describedby="vocabulary-help" placeholder="e.g. Tala, Ateneo de Manila, Kubernetes, barangay"></textarea></label><p id="vocabulary-help">Help Whisper recognize unusual names, acronyms, and technical terms by listing words you expect to hear, or adding a short description of the recording. For example: “A Taglish lecture about Kubernetes at Ateneo de Manila.” This is a recognition hint, not a replacement list or an instruction to rewrite text. It may improve spelling but does not guarantee it. Leave blank for general recordings. Applies to new audio in live, file, and URL transcriptions.</p><p>Use Automatic for mixed languages. Translation is disabled.</p><button id="save-settings" class="primary">Save settings</button></div><div class="settings-group"><h2>Application</h2><label><input id="menu-bar-icon" type="checkbox" ${s.menuBarIcon ? "checked" : ""}> Show Tala in the menu bar</label><p>Off by default. Enable quick recording controls in the menu bar. You can always reopen Tala from the Dock.</p></div><div class="settings-group"><h2>Media tools</h2><p>FFmpeg decodes local files. yt-dlp imports supported URLs. Required for media imports.</p><div id="dependency-checks" aria-live="polite"></div></div><div class="settings-group"><h2>Storage</h2><p>${escape(state.output || "~/Documents/Kian/")}<br>Temporary audio is deleted after processing.</p><button id="open-storage">Open transcript folder</button></div>`,
+    `<h1 class="visually-hidden">Settings</h1>${appearanceSettings()}<div class="settings-group"><h2>Whisper Large v3 Turbo</h2><div class="model-status"><strong>${escape({ reused: "Existing model verified", downloaded: "Model downloaded", checking: "Checking existing models…", missing: "Model required" }[m.state] || m.state)}</strong><code>${escape(m.path || m.detail || "Choose an existing model below.")}</code></div><p>Model format and SHA-256 checksum must match Whisper Large v3 Turbo.</p><label class="field"><span>Existing model path</span><input id="model-path" value="${escape(s.modelPath || m.path || "")}" placeholder="/path/to/ggml-large-v3-turbo.bin"></label><label class="field"><span>Additional model directory</span><input id="model-dir" value="${escape(s.modelDir || "")}" placeholder="Optional directory to search"></label><div class="controls"><button id="choose-model">Choose model…</button><button id="verify-model">Save and verify model</button>${m.path ? "" : '<button id="download-model">Download model (1.6 GB)</button>'}</div></div><div class="settings-group"><h2>Recognition</h2><label class="field"><span>Language</span><select id="language"><option value="auto">Automatic (English, Filipino, Taglish, other languages)</option><option value="en">English</option><option value="tl">Filipino / Tagalog</option></select></label><label class="field"><span>Vocabulary hints (optional)</span><textarea id="context-prompt" aria-describedby="vocabulary-help" placeholder="e.g. Tala, Ateneo de Manila, Kubernetes, barangay"></textarea></label><p id="vocabulary-help">Help Whisper recognize unusual names, acronyms, and technical terms by listing words you expect to hear, or adding a short description of the recording. For example: “A Taglish lecture about Kubernetes at Ateneo de Manila.” This is a recognition hint, not a replacement list or an instruction to rewrite text. It may improve spelling but does not guarantee it. Leave blank for general recordings. Applies to new audio in live, file, and URL transcriptions.</p><p>Use Automatic for mixed languages. Translation is disabled.</p><button id="save-settings" class="primary">Save settings</button></div><div class="settings-group"><h2>Application</h2><label><input id="menu-bar-icon" type="checkbox" ${s.menuBarIcon ? "checked" : ""}> Show Tala in the menu bar</label><p>Off by default. Enable quick recording controls in the menu bar. You can always reopen Tala from the Dock.</p></div><div class="settings-group"><h2>Media tools</h2><p>FFmpeg decodes local files. yt-dlp imports supported URLs. Required for media imports.</p><div id="dependency-checks" aria-live="polite"></div></div><div class="settings-group"><h2>Storage</h2><p>${escape(state.output || "~/Documents/Kian/")}<br>Temporary audio is deleted after processing.</p><button id="open-storage">Open transcript folder</button></div>`,
   );
+  bindAppearanceSettings();
   renderDependencyChecks();
+  refreshDependencies();
   $("#language").value = s.language || "auto";
   $("#context-prompt").value = s.prompt || "";
   $("#menu-bar-icon").onchange = async (event) => {
@@ -918,7 +1127,6 @@ document
   .querySelectorAll("[data-nav]")
   .forEach((b) => (b.onclick = () => navigate(b.dataset.nav)));
 $("#active-recording").onclick = () => openSession(state.live.sessionId);
-$("#all-history").onclick = () => navigate("history");
 $("#pin").onclick = async () => {
   try {
     await rpc("top", !pinned);
@@ -974,11 +1182,14 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") $("#error").hidden = true;
 });
 setInterval(() => {
-  if ($("#live-clock") && state.live.active)
-    $("#live-clock").textContent = clock(
+  if (!state.live.active) return;
+  for (const selector of ["#live-clock", "#home-live-clock"]) {
+    if ($(selector)) $(selector).textContent = clock(
       (Date.now() - new Date(state.live.started)) / 1000,
     );
+  }
 }, 1000);
+syncNavigation();
 render();
 if (window.webkit?.messageHandlers?.tala)
   rpc("snapshot").then(applySnapshot).catch(error);
