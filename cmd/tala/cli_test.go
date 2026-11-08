@@ -25,6 +25,16 @@ func TestCLIOptions(t *testing.T) {
 		{"--format", "exe", "audio.wav"},
 		{"--text-mode", "invalid", "audio.wav"},
 		{"--format", "srt", "one.wav", "two.wav"},
+		{"--start", "1:60", "one.wav"},
+		{"--start", "30", "--end", "10", "one.wav"},
+		{"--end", "0", "one.wav"},
+		{"--record", "--start", "10"},
+		{"--cookies-from-browser", "invalid", "https://example.org/audio"},
+		{"--browser-profile", "Default", "https://example.org/audio"},
+		{"--cookies-from-browser", "chrome", "--list"},
+		{"--cookies-from-browser", "dia", "https://example.org/media"},
+		{"--cookies", "https://example.org/cookies", "https://example.org/media"},
+		{"--cookies-from-browser", "chrome", "--cookies", "/cookies.txt", "https://example.org/media"},
 	} {
 		if _, err := parseOptions(args, io.Discard); err == nil {
 			t.Errorf("accepted %v", args)
@@ -33,6 +43,28 @@ func TestCLIOptions(t *testing.T) {
 	o, err := parseOptions([]string{"--single-line", "--prompt=", "--transcribe", "first.wav", "--transcribe", "https://example.org/audio", "third.wav"}, io.Discard)
 	if err != nil || len(o.input) != 3 || o.textMode != "continuous" || !o.promptSet {
 		t.Fatalf("options: %+v %v", o, err)
+	}
+}
+
+func TestCLIImportRangeAndSignIn(t *testing.T) {
+	o, err := parseOptions([]string{"--start", "1:02.250", "--end", "2:03", "--cookies-from-browser", "chrome", "--browser-profile", "Profile 1", "https://example.org/audio"}, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if o.selection.Start != 62.25 || o.selection.End != 123 || !o.cookieBrowserSet || o.cookieProfile != "Profile 1" {
+		t.Fatalf("import options lost: %+v", o)
+	}
+	o, err = parseOptions([]string{"--cookies-from-browser=", "https://example.org/audio"}, io.Discard)
+	if err != nil || !o.cookieBrowserSet || o.cookieBrowser != "" {
+		t.Fatal("cannot disable saved browser sign-in")
+	}
+	o, err = parseOptions([]string{"--cookies", "/cookies.txt", "https://example.org/media"}, io.Discard)
+	if err != nil || o.cookieBrowser != "other" || !o.cookieBrowserSet {
+		t.Fatalf("cookie export options: %+v %v", o, err)
+	}
+	o, err = parseOptions([]string{"--cookies-from-browser", "zen", "https://example.org/media"}, io.Discard)
+	if err != nil || o.cookieBrowser != "zen" {
+		t.Fatalf("Zen options: %+v %v", o, err)
 	}
 }
 

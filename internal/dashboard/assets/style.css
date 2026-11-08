@@ -695,6 +695,9 @@ nav button.active {
   flex: 1;
   min-width: 0;
 }
+.file-item > .icon-button {
+  align-self: flex-start;
+}
 .file-item strong {
   display: block;
   font-weight: 550;
@@ -782,6 +785,69 @@ nav button.active {
   gap: 10px;
   margin-top: 12px;
   font-size: 12px;
+}
+.time-range {
+  margin: 14px 0 0;
+  padding: 12px 0 0;
+  border: 0;
+  border-top: 1px solid var(--line);
+  min-width: 0;
+}
+.time-range legend {
+  padding: 0 8px 0 0;
+  font-size: 12px;
+  font-weight: 550;
+}
+.range-inputs,
+.auth-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.range-inputs label {
+  display: grid;
+  gap: 6px;
+  font-size: 11px;
+}
+.range-inputs input {
+  width: 100%;
+  min-width: 0;
+  font-variant-numeric: tabular-nums;
+}
+.range-help,
+.sign-in-helper p {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.6;
+  margin: 9px 0 0;
+}
+.range-help.field-error {
+  color: var(--danger);
+}
+.sign-in-helper {
+  margin-top: 12px;
+  font-size: 12px;
+}
+.sign-in-helper summary {
+  cursor: pointer;
+  color: var(--accent);
+}
+.sign-in-helper .auth-fields {
+  margin-top: 14px;
+}
+.sign-in-helper .sign-in-url {
+  margin-top: 14px;
+}
+#cookie-file-field > label {
+  display: block;
+  margin-bottom: 6px;
+}
+.sign-in-helper .controls {
+  margin-top: 14px;
+  flex-wrap: wrap;
+}
+@media (max-width: 600px) {
+  .auth-fields { grid-template-columns: minmax(0, 1fr); }
 }
 .job-head {
   display: flex;

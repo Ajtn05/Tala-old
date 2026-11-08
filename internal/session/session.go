@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"tala/internal/media"
 	"tala/internal/models"
 )
 
@@ -35,6 +36,7 @@ type Session struct {
 	Title       string            `json:"title"`
 	Created     time.Time         `json:"created"`
 	Duration    float64           `json:"duration"`
+	Range       media.TimeRange   `json:"range,omitempty"`
 	Type        string            `json:"type"`
 	Source      string            `json:"source"`
 	MediaPath   string            `json:"mediaPath,omitempty"`
