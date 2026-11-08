@@ -257,3 +257,58 @@ func TestRetainedCopyCancellationRemovesOnlyNewFile(t *testing.T) {
 		t.Fatal("source removed")
 	}
 }
+
+func TestClearQueueCancelsWorkAndPreservesSessions(t *testing.T) {
+	c := controller(t)
+	v, err := c.Store.Create("file", "Saved transcript", "/original.wav")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.jobs = []Job{
+		{ID: "active", State: "transcribing", SessionID: v.ID},
+		{ID: "waiting", State: "waiting"},
+		{ID: "finished", State: "completed"},
+	}
+	c.ownedJobs = map[string]bool{"active": true, "waiting": true}
+	ctx, cancel := context.WithCancel(c.ctx)
+	defer cancel()
+	c.activeJob, c.cancelJob = "active", cancel
+	c.live.Active = true
+	if err := c.ClearQueue(); err != nil {
+		t.Fatal(err)
+	}
+	if ctx.Err() != context.Canceled || len(c.Jobs()) != 0 || len(c.ownedJobs) != 0 {
+		t.Fatal("queue was not cleared and cancelled")
+	}
+	if !c.LiveState().Active {
+		t.Fatal("clearing imports stopped live recording")
+	}
+	if _, err := c.Store.Get(v.ID); err != nil {
+		t.Fatalf("saved session removed: %v", err)
+	}
+	// A final callback from a cancelled import cannot recreate the cleared row.
+	c.changeJob("active", func(j *Job) { j.State = "cancelled" })
+	b, err := os.ReadFile(c.queuePath())
+	if err != nil || string(b) != "[]" {
+		t.Fatalf("queue not durably empty: %s, %v", b, err)
+	}
+}
+
+func TestClearQueueRollsBackWhenPersistenceFails(t *testing.T) {
+	c := controller(t)
+	c.jobs = []Job{{ID: "active", State: "transcribing"}}
+	ctx, cancel := context.WithCancel(c.ctx)
+	defer cancel()
+	c.activeJob, c.cancelJob = "active", cancel
+	blocker := filepath.Join(t.TempDir(), "not-a-directory")
+	if err := os.WriteFile(blocker, []byte("original"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	c.Store.Dir = blocker
+	if err := c.ClearQueue(); err == nil {
+		t.Fatal("expected persistence error")
+	}
+	if len(c.Jobs()) != 1 || ctx.Err() != nil {
+		t.Fatal("failed clear changed queue or cancelled work")
+	}
+}

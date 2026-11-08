@@ -62,7 +62,7 @@ static void sendEvent(NSString *type,id data) {
   sendEvent(@"reply",@{@"id":message.body[@"id"]?:@(-1),@"result":NSNull.null});
   return;
  }
- if([message.body[@"action"] isEqual:@"preference"]){NSDictionary *data=message.body[@"data"];if([@[@"displayMode",@"fontSize",@"selectedSession"] containsObject:data[@"key"]]&&[data[@"value"] isKindOfClass:NSString.class]){[NSUserDefaults.standardUserDefaults setObject:data[@"value"] forKey:[@"Tala." stringByAppendingString:data[@"key"]]];}return;}
+ if([message.body[@"action"] isEqual:@"preference"]){NSDictionary *data=message.body[@"data"];if([@[@"displayMode",@"fontSize",@"selectedSession",@"historySort",@"historyGroup",@"colorScheme",@"appearance"] containsObject:data[@"key"]]&&[data[@"value"] isKindOfClass:NSString.class]){[NSUserDefaults.standardUserDefaults setObject:data[@"value"] forKey:[@"Tala." stringByAppendingString:data[@"key"]]];}return;}
  NSData *data=[NSJSONSerialization dataWithJSONObject:message.body options:0 error:nil];
  if(data.length>4*1024*1024)return;
  NSString *s=[[NSString alloc]initWithData:data encoding:NSUTF8StringEncoding];goDashboardMessage((char*)s.UTF8String);
@@ -129,7 +129,7 @@ void dashboardInit(const char *html) {
  WKWebViewConfiguration *configuration=[WKWebViewConfiguration new];configuration.websiteDataStore=[WKWebsiteDataStore nonPersistentDataStore];
  [configuration.userContentController addScriptMessageHandler:host name:@"tala"];
  NSDictionary *legacyPreferences=[NSUserDefaults.standardUserDefaults persistentDomainForName:@"app.getkian.studio"];
- NSMutableDictionary *preferences=[NSMutableDictionary dictionary];for(NSString *key in @[@"displayMode",@"fontSize",@"selectedSession"]){NSString *value=[NSUserDefaults.standardUserDefaults stringForKey:[@"Tala." stringByAppendingString:key]];if(!value)value=legacyPreferences[[@"KianStudio." stringByAppendingString:key]];if(value)preferences[key]=value;}
+ NSMutableDictionary *preferences=[NSMutableDictionary dictionary];for(NSString *key in @[@"displayMode",@"fontSize",@"selectedSession",@"historySort",@"historyGroup",@"colorScheme",@"appearance"]){NSString *value=[NSUserDefaults.standardUserDefaults stringForKey:[@"Tala." stringByAppendingString:key]];if(!value)value=legacyPreferences[[@"KianStudio." stringByAppendingString:key]];if(value)preferences[key]=value;}
  NSData *prefs=[NSJSONSerialization dataWithJSONObject:preferences options:0 error:nil];NSString *prefsJSON=[[NSString alloc]initWithData:prefs encoding:NSUTF8StringEncoding];
  [configuration.userContentController addUserScript:[[WKUserScript alloc]initWithSource:[NSString stringWithFormat:@"window.talaPreferences=%@;",prefsJSON] injectionTime:WKUserScriptInjectionTimeAtDocumentStart forMainFrameOnly:YES]];
  host.web=[[TalaWebView alloc]initWithFrame:NSMakeRect(0,0,1100,760) configuration:configuration];host.web.UIDelegate=host;host.web.navigationDelegate=host;

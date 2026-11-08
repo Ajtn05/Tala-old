@@ -32,7 +32,7 @@ The app is ad-hoc signed. If macOS blocks opening it, use the app's **Open** act
 
 ### 2. Check optional media dependencies
 
-Open **New transcription → Import audio or video**, or **Settings → Media tools**. Tala automatically checks for **ffmpeg**, **ffprobe**, and **yt-dlp**, shows which are available, and explains what is missing for each workflow.
+Open **Settings → Media tools**. Tala automatically checks for **ffmpeg**, **ffprobe**, and **yt-dlp**, shows which are available, and explains what is missing for each workflow.
 
 | What you want to do                    | Extra tools needed          |
 | -------------------------------------- | --------------------------- |
@@ -64,11 +64,11 @@ The model is saved at `~/Library/Application Support/Kian/models/ggml-large-v3-t
 
 Leave **Settings → Language → Automatic / multilingual** selected for mixed-language speech, including Taglish. Optional English and Filipino/Tagalog settings are available for recordings in one language. The same language settings apply to live, file, and URL transcription.
 
-- **Live:** choose **New transcription → Record live audio**, select your audio source, and click **Start recording**. Grant microphone/audio capture access when requested, then click **Stop recording** when finished.
-- **File:** choose **New transcription → Import audio or video**, select or drop an audio/video file, review its details, and click **Add to queue**.
-- **URL:** in **New transcription → Import audio or video**, paste a supported media URL, click **Fetch details**, then **Add to queue**.
+- **Live:** open **New transcription**, select your audio source in the live transcription bar, and click **Start recording**. Grant microphone/audio capture access when requested, then click **Stop recording** when finished.
+- **File:** on **New transcription**, drop an audio/video file into the upload area or click **choose files**, review its details, and click **Add to queue**.
+- **URL:** paste a supported media URL into the link field on **New transcription**, click **Fetch details**, then **Add to queue**.
 
-Open the resulting session to edit, copy, or export it. **Copy text**, **Format**, and **Export file…** stay at the bottom of the window while the transcript scrolls. Transcripts are saved in `~/Documents/Kian/`; allow Documents access if macOS asks. After initial setup, live recording and local-file transcription work offline. URL imports require internet access.
+The home screen shows the processing queue and recent sessions in lists that expand with the window height. Scroll either list to see more entries. Use **Sessions** or **Queue** in the top navigation to view the full lists; Settings is alongside them in the top navigation. Open a session to edit, copy, or export it. **Copy text**, **Format**, and **Export file…** stay at the bottom of the window while the transcript scrolls. Transcripts are saved in `~/Documents/Kian/`; allow Documents access if macOS asks. After initial setup, live recording and local-file transcription work offline. URL imports require internet access.
 
 For a Terminal dependency check without opening the dashboard or downloading anything:
 
@@ -244,7 +244,7 @@ Rebuilds preserve previous bundles in `dist/previous-builds/`, including any fil
 
 ## Live recording
 
-Open New transcription → Record live audio, choose Microphone, System audio, or both, and start recording. The menu bar and dashboard use the same controller, source selection, and start/stop state. Changing sources requires stopping first. Closing the dashboard hides its window; capture continues. Reopen it from the Dock, or the menu bar if enabled.
+Open New transcription, choose Microphone, System audio, or both in the recording bar, and start recording. The menu bar and dashboard use the same controller, source selection, and start/stop state. Changing sources requires stopping first. Closing the dashboard hides its window; capture continues. Reopen it from the Dock, or the menu bar if enabled.
 
 Grant microphone and audio capture permissions when macOS asks. Settings → Privacy & Security → Microphone / Audio Capture can restore denied access. A rebuilt ad-hoc signed app may need fresh permission. Documents access may also be requested. All capture and inference stay on the Mac.
 
@@ -258,23 +258,23 @@ Install optional media tools once:
 brew install ffmpeg yt-dlp
 ```
 
-They are external tools, not bundled. Tala finds them in PATH, `/opt/homebrew/bin`, `/usr/local/bin`, or a bundle Resources/tools directory. No manual Python environment configuration is needed. Live recording works without these tools. Import media and Settings report each tool's availability, location, and readiness for local files versus URLs. Use **Check again** after installing tools; the app also checks again when you open Import media and before enqueueing or processing an import. Missing dependencies are reported before any media download or model loading. The Terminal equivalent is `./tala --check-dependencies`.
+They are external tools, not bundled. Tala finds them in PATH, `/opt/homebrew/bin`, `/usr/local/bin`, or a bundle Resources/tools directory. No manual Python environment configuration is needed. Live recording works without these tools. Settings reports each tool's availability, location, and readiness for local files versus URLs. The home screen links to Settings when an import tool is missing. Use **Check again** after installing tools; the app also checks again when you open New transcription and before enqueueing or processing an import. Missing dependencies are reported before any media download or model loading. The Terminal equivalent is `./tala --check-dependencies`.
 
-Choose New transcription → Import audio or video, select multiple files or drag them from Finder, review their actual audio format and duration, then add them to the queue. FFmpeg decodes the first audio stream from common audio/video containers. Audio is streamed as 16 kHz mono float PCM in non-overlapping 30-second windows, without playback or deliberate delays. Decoding reads one window ahead while Whisper processes the current window. Windows containing only exact zero samples skip inference while preserving their place in the timeline; any nonzero sample, however quiet, still reaches Whisper. Memory use for decoding is bounded; a whole long video is never loaded into RAM. Recognition near a window boundary may be less accurate than within a window.
+On New transcription, select multiple files or drag them from Finder into the upload area, review their actual audio format and duration, then add them to the queue. FFmpeg decodes the first audio stream from common audio/video containers. Audio is streamed as 16 kHz mono float PCM in non-overlapping 30-second windows, without playback or deliberate delays. Decoding reads one window ahead while Whisper processes the current window. Windows containing only exact zero samples skip inference while preserving their place in the timeline; any nonzero sample, however quiet, still reaches Whisper. Memory use for decoding is bounded; a whole long video is never loaded into RAM. Recognition near a window boundary may be less accurate than within a window.
 
 For a URL, fetch its metadata, review the title and duration, and add it to the queue. Accessible YouTube videos, Shorts, direct media URLs, and sites supported by the installed yt-dlp are supported. Playlists are limited to one selected video; multi-video playlist expansion is not implemented. Restricted, private, DRM-protected, unavailable, and network-failed media report tool errors. Tala does not supply credentials or bypass access controls. Only import content you are authorized to access.
 
 URL audio is downloaded into a private temporary directory. Temporary downloads are removed on success, error, and cancellation. An explicit Keep downloaded media option retains one durable copy under Documents/Kian/media for review. Original local files are referenced in place and never deleted. A crash or forced kill can leave an OS temporary directory; it does not affect original media.
 
-The queue processes one job at a time and retains partial transcripts on cancellation/error. Cancel and Retry are available. A restart restores waiting and interrupted imports from the beginning in a new session; the earlier partial session remains marked Interrupted. Completed sessions remain available. Progress reflects decoded audio that has actually finished inference. Elapsed time includes preparation and any live-recording pause. Processing speed depends on the Mac and media; no fixed faster-than-real-time speed is promised.
+The queue processes one job at a time and retains partial transcripts on cancellation/error. Cancel and Retry are available. A restart restores waiting and interrupted imports from the beginning in a new session; the earlier partial session remains marked Interrupted. Completed sessions remain available. **Clear queue** removes the full queue list and cancels active/waiting imports after confirmation; saved sessions, partial transcripts, and original media remain available. Progress reflects decoded audio that has actually finished inference. Elapsed time includes preparation and any live-recording pause. Processing speed depends on the Mac and media; no fixed faster-than-real-time speed is promised.
 
 When live recording starts, the current import finishes its active inference window, then waits at the next checkpoint until live recording stops. There is only one loaded model and inference is serialized. Stopping a batch job cancels its decoder/downloader process group and prevents subsequent inference windows. The pinned Whisper binding checks cancellation at encoder checkpoints, so stopping an active native inference call may take time.
 
 ## Review, edit, and export
 
-Live, file, and URL sessions share one viewer. Choose Text only · paragraphs, Text only · single line, Timestamps, or Sources + timestamps without rerunning inference. Single line joins segments and collapses whitespace when copying or exporting plain text; the viewer still wraps to the window width. Subtitle timings stay unchanged. Adjust font size, auto-scroll, or search with Cmd+F. Cmd+N starts a new transcription. Standard Cmd+C / Cmd+A / Cmd+V editing shortcuts are available. The pin button keeps the dashboard above other windows.
+Live, file, and URL sessions share one viewer. Choose Text only · paragraphs, Text only · single line, Timestamps, or Sources + timestamps without rerunning inference. Single line joins segments and collapses whitespace when copying or exporting plain text; the viewer still wraps to the window width. Subtitle timings stay unchanged. Adjust font size, auto-scroll, or search with Cmd+F. Cmd+N starts a new transcription. Standard Cmd+C / Cmd+A / Cmd+V editing shortcuts are available. The pin button keeps the dashboard above other windows. **Settings → Appearance** offers Slate, Graphite, Evergreen, Iris, Tangerine, and Lagoon color schemes, with system, light, or dark appearance. Choices persist across launches. The bundled Manrope variable font works offline.
 
-Hover or focus a segment and choose Edit. Save correction stores it separately from the original text. Restore original removes the correction. Incoming segments do not replace saved corrections. History searches titles and corrected transcript contents; sessions can be renamed or deleted with a confirmation. Deletion removes only structured session files, preserving original media, legacy TXT files, and models. A small deletion record prevents a preserved legacy file from reappearing in history on the next launch.
+Hover or focus a segment and choose Edit. Save correction stores it separately from the original text. Restore original removes the correction. Incoming segments do not replace saved corrections. History searches titles and corrected transcript contents. Sort by date, title, or duration, and group by day, month, source, or status. Day groups use your local calendar date. Sort and group choices persist across launches; sessions can be renamed or deleted with a confirmation. Deletion removes only structured session files, preserving original media, legacy TXT files, and models. A small deletion record prevents a preserved legacy file from reappearing in history on the next launch.
 
 Copy transcript uses the selected display mode. Text selection and Cmd+C copy a selection. Export through the native save dialog to TXT, Markdown, SRT, or VTT. Subtitle formats use actual segment times, without invented speaker identities or word timings. Untimed legacy transcripts cannot be exported as subtitles.
 
@@ -306,7 +306,7 @@ The [Build and test workflow](https://github.com/Ajtn05/Tala/actions/workflows/b
 make test
 make race
 make test-setup # Offline native setup/cache recovery checks for macOS and Linux
-make test-ui # Optional Node.js development check for file-drop handlers
+make test-ui # Optional Node.js checks for dashboard recording, imports, and updates
 # Optional real-inference parity and CPU-thread timing comparison (macOS needs Metal access):
 TALA_TEST_MODEL="/path/to/ggml-large-v3-turbo.bin" make test-import-speed
 # Optional real installed-model checksum integration:
@@ -317,4 +317,4 @@ TALA_TEST_MODEL="$HOME/Applications/Kian.app/Contents/Resources/models/ggml-larg
 
 See [verification notes](docs/VERIFICATION.md) for exercised paths and remaining manual checks, and [import performance experiments](docs/IMPORT_PERFORMANCE.md) for timing and transcript-parity results. Floating captions, playlist expansion, and current-playback segment highlighting are not implemented.
 
-MIT; upstream license and attribution are preserved. Tala is an independent extension of Kian; the original project is credited above.
+Application code is MIT; upstream license and attribution are preserved. Manrope is bundled under the [SIL Open Font License](internal/dashboard/assets/Manrope-OFL.txt); its license is also included in the app’s Resources folder. Tala is an independent extension of Kian; the original project is credited above.

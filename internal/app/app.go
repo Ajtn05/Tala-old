@@ -381,6 +381,29 @@ func (c *Controller) Jobs() []Job {
 	defer c.mu.Unlock()
 	return append([]Job{}, c.jobs...)
 }
+
+// ClearQueue forgets queued work and cancels the active import. Saved sessions
+// and original media are independent of the queue and remain available.
+func (c *Controller) ClearQueue() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	previous := c.jobs
+	c.jobs = []Job{}
+	if err := c.saveJobsLocked(); err != nil {
+		c.jobs = previous
+		return err
+	}
+	if c.cancelJob != nil {
+		c.cancelJob()
+	}
+	for _, job := range previous {
+		delete(c.ownedJobs, job.ID)
+	}
+	c.cond.Broadcast()
+	c.emitLocked("jobs", []Job{})
+	return nil
+}
+
 func (c *Controller) changeJob(id string, fn func(*Job)) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
