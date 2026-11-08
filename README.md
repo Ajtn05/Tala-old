@@ -260,7 +260,7 @@ brew install ffmpeg yt-dlp
 
 They are external tools, not bundled. Tala finds them in PATH, `/opt/homebrew/bin`, `/usr/local/bin`, or a bundle Resources/tools directory. No manual Python environment configuration is needed. Live recording works without these tools. Import media and Settings report each tool's availability, location, and readiness for local files versus URLs. Use **Check again** after installing tools; the app also checks again when you open Import media and before enqueueing or processing an import. Missing dependencies are reported before any media download or model loading. The Terminal equivalent is `./tala --check-dependencies`.
 
-Choose New transcription → Import audio or video, select multiple files or drag them from Finder, review their actual audio format and duration, then add them to the queue. FFmpeg decodes the first audio stream from common audio/video containers. Audio is streamed as 16 kHz mono float PCM in non-overlapping 30-second windows, without playback or deliberate delays. Memory use for decoding is bounded; a whole long video is never loaded into RAM. Recognition near a window boundary may be less accurate than within a window.
+Choose New transcription → Import audio or video, select multiple files or drag them from Finder, review their actual audio format and duration, then add them to the queue. FFmpeg decodes the first audio stream from common audio/video containers. Audio is streamed as 16 kHz mono float PCM in non-overlapping 30-second windows, without playback or deliberate delays. Decoding reads one window ahead while Whisper processes the current window. Windows containing only exact zero samples skip inference while preserving their place in the timeline; any nonzero sample, however quiet, still reaches Whisper. Memory use for decoding is bounded; a whole long video is never loaded into RAM. Recognition near a window boundary may be less accurate than within a window.
 
 For a URL, fetch its metadata, review the title and duration, and add it to the queue. Accessible YouTube videos, Shorts, direct media URLs, and sites supported by the installed yt-dlp are supported. Playlists are limited to one selected video; multi-video playlist expansion is not implemented. Restricted, private, DRM-protected, unavailable, and network-failed media report tool errors. Tala does not supply credentials or bypass access controls. Only import content you are authorized to access.
 
@@ -306,12 +306,14 @@ The [Build and test workflow](https://github.com/Ajtn05/Tala/actions/workflows/b
 make test
 make race
 make test-ui # Optional Node.js development check for file-drop handlers
+# Optional real-inference parity and CPU-thread timing comparison (macOS needs Metal access):
+TALA_TEST_MODEL="/path/to/ggml-large-v3-turbo.bin" make test-import-speed
 # Optional real installed-model checksum integration:
 TALA_TEST_MODEL="$HOME/Applications/Kian.app/Contents/Resources/models/ggml-large-v3-turbo.bin" make test
 # Direct local batch smoke test, without the dashboard:
 ./tala --transcribe third_party/whisper.cpp/samples/jfk.mp3 --output /tmp/tala-smoke
 ```
 
-See [verification notes](docs/VERIFICATION.md) for exercised paths and remaining manual checks. Floating captions, playlist expansion, and current-playback segment highlighting are not implemented.
+See [verification notes](docs/VERIFICATION.md) for exercised paths and remaining manual checks, and [import performance experiments](docs/IMPORT_PERFORMANCE.md) for timing and transcript-parity results. Floating captions, playlist expansion, and current-playback segment highlighting are not implemented.
 
 MIT; upstream license and attribution are preserved. Tala is an independent extension of Kian; the original project is credited above.

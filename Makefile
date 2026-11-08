@@ -18,7 +18,7 @@ else ifeq ($(HOST_OS),Linux)
 export CGO_LDFLAGS := -L$(ROOT_DIR)/third_party/portaudio_static -lasound -ldl -lpthread -lm
 endif
 
-.PHONY: setup build test test-ui race clean bundle package
+.PHONY: setup build test test-ui test-import-speed race clean bundle package
 
 setup:
 	@bash scripts/setup.sh
@@ -34,6 +34,9 @@ test:
 
 test-ui:
 	node --test internal/dashboard/tests/*.test.cjs
+
+test-import-speed:
+	go test -count=1 -timeout=20m -run '^TestImportOptimizationParity$$' -v ./internal/transcriber
 
 race:
 	go test -race ./...
