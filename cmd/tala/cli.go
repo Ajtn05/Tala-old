@@ -32,6 +32,7 @@ type options struct {
 	start, end, cookieBrowser, cookieProfile                             string
 	cookieBrowserSet                                                     bool
 	cookiesFile                                                          string
+	progress                                                             string
 	selection                                                            media.TimeRange
 	checkDependencies, checkModel, ensureModel, record, list, singleLine bool
 	input                                                                inputs
@@ -57,6 +58,7 @@ func parseOptions(args []string, stderr io.Writer) (options, error) {
 	f.StringVar(&o.cookieBrowser, "cookies-from-browser", "", "Use this signed-in browser for URLs; empty disables saved sign-in")
 	f.StringVar(&o.cookieProfile, "browser-profile", "", "Browser profile name/path for --cookies-from-browser")
 	f.StringVar(&o.cookiesFile, "cookies", "", "Local Netscape cookies.txt export for Dia or other browsers (original is preserved)")
+	f.StringVar(&o.progress, "progress", "auto", "Progress on stderr: auto (terminal bar/plain log lines), always (bar), or never")
 	f.StringVar(&o.output, "output", "", "Directory for saved sessions (TALA_OUTPUT_DIR overrides the platform default)")
 	f.StringVar(&o.model, "model", "", "Existing Large v3 Turbo GGML model path")
 	f.StringVar(&o.language, "language", "", "auto, en, or tl (default: saved setting or auto)")
@@ -71,6 +73,9 @@ func parseOptions(args []string, stderr io.Writer) (options, error) {
 	f.BoolVar(&o.singleLine, "single-line", false, "Join plain text into one line (alias for --text-mode continuous)")
 	if err := f.Parse(args); err != nil {
 		return o, err
+	}
+	if o.progress != "auto" && o.progress != "always" && o.progress != "never" {
+		return o, errors.New("--progress must be auto, always, or never")
 	}
 	f.Visit(func(v *flag.Flag) {
 		if v.Name == "cookies-from-browser" {
@@ -269,16 +274,22 @@ func execute(ctx context.Context, o options, manager models.Manager, stdout, std
 		return err
 	}
 	defer c.Close()
+	progress := newCLIProgress(stderr, o.progress)
+	defer progress.Close()
 	// Consume bounded UI events even without a window; completion uses controller
 	// snapshots so an overflow or a fast job cannot hide the terminal state.
 	done := make(chan struct{})
-	defer close(done)
+	eventsDone := make(chan struct{})
+	defer func() { close(done); <-eventsDone }()
 	go func() {
+		defer close(eventsDone)
 		for {
 			select {
 			case event := <-c.Events:
 				if event.Type == "error" {
-					fmt.Fprintln(stderr, event.Data)
+					progress.Message(fmt.Sprint(event.Data))
+				} else if event.Type == "activity" && o.progress != "never" {
+					progress.Message(fmt.Sprint(event.Data))
 				}
 				c.AfterEvent()
 			case <-done:
@@ -286,7 +297,7 @@ func execute(ctx context.Context, o options, manager models.Manager, stdout, std
 			}
 		}
 	}()
-	if err := waitModel(ctx, c); err != nil {
+	if err := waitModel(ctx, c, progress); err != nil {
 		return err
 	}
 	if o.record {
@@ -302,8 +313,8 @@ func execute(ctx context.Context, o options, manager models.Manager, stdout, std
 			return err
 		}
 		id := c.LiveState().SessionID
-		fmt.Fprintln(stderr, "Recording. Press Ctrl+C to stop and save.")
-		if err := waitRecording(ctx, c, o.duration); err != nil {
+		progress.Message("Recording. Press Ctrl+C to stop and save.")
+		if err := waitRecording(ctx, c, o.duration, progress); err != nil {
 			return err
 		}
 		return exportSession(store, id, o, stdout)
@@ -313,8 +324,8 @@ func execute(ctx context.Context, o options, manager models.Manager, stdout, std
 		if err != nil {
 			return err
 		}
-		fmt.Fprintf(stderr, "Transcribing %d/%d: %s\n", i+1, len(o.input), input)
-		id, err := waitJob(ctx, c, job.ID)
+		progress.Message(fmt.Sprintf("Transcribing %d/%d: %s", i+1, len(o.input), input))
+		id, err := waitJob(ctx, c, job.ID, progress)
 		if err != nil {
 			return err
 		}
@@ -340,7 +351,8 @@ func inputKind(input string) string {
 	}
 	return "file"
 }
-func waitModel(ctx context.Context, c *app.Controller) error {
+func waitModel(ctx context.Context, c *app.Controller, progress *cliProgress) error {
+	started := time.Now()
 	ticker := time.NewTicker(50 * time.Millisecond)
 	defer ticker.Stop()
 	for {
@@ -351,6 +363,7 @@ func waitModel(ctx context.Context, c *app.Controller) error {
 			}
 			return nil
 		}
+		progress.Update(progressFrame{id: "model", state: "checking", label: "Checking model", step: int(time.Since(started) / (100 * time.Millisecond))})
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -358,7 +371,9 @@ func waitModel(ctx context.Context, c *app.Controller) error {
 		}
 	}
 }
-func waitJob(ctx context.Context, c *app.Controller, id string) (string, error) {
+func waitJob(ctx context.Context, c *app.Controller, id string, progress *cliProgress) (string, error) {
+	started := time.Now()
+	last := app.Job{ID: id, State: "waiting"}
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
 	for {
@@ -366,6 +381,8 @@ func waitJob(ctx context.Context, c *app.Controller, id string) (string, error) 
 			if job.ID != id {
 				continue
 			}
+			last = job
+			progress.Update(jobFrame(job, time.Since(started)))
 			switch job.State {
 			case "completed":
 				return job.SessionID, nil
@@ -378,14 +395,18 @@ func waitJob(ctx context.Context, c *app.Controller, id string) (string, error) 
 		select {
 		case <-ctx.Done():
 			_ = c.CancelJob(id)
+			last.State = "cancelled"
+			progress.Update(jobFrame(last, time.Since(started)))
 			return "", ctx.Err()
 		case <-ticker.C:
 		}
 	}
 }
-func waitRecording(ctx context.Context, c *app.Controller, duration time.Duration) error {
+func waitRecording(ctx context.Context, c *app.Controller, duration time.Duration, progress *cliProgress) error {
 	var timer *time.Timer
 	var limit <-chan time.Time
+	var recordingStarted time.Time
+	var recorded time.Duration
 	defer func() {
 		if timer != nil {
 			timer.Stop()
@@ -396,6 +417,13 @@ func waitRecording(ctx context.Context, c *app.Controller, duration time.Duratio
 	stopping := false
 	for {
 		live := c.LiveState()
+		if live.State == "recording" && recordingStarted.IsZero() {
+			recordingStarted = time.Now()
+		}
+		if !recordingStarted.IsZero() && !stopping {
+			recorded = time.Since(recordingStarted)
+		}
+		progress.Update(recordingFrame(live.State, recorded, duration))
 		if !live.Active {
 			if live.Error != "" {
 				return errors.New(live.Error)
@@ -409,11 +437,17 @@ func waitRecording(ctx context.Context, c *app.Controller, duration time.Duratio
 		select {
 		case <-ctx.Done():
 			if !stopping {
+				if !recordingStarted.IsZero() {
+					recorded = time.Since(recordingStarted)
+				}
 				c.Stop()
 				stopping = true
 			}
 			ctx = context.Background()
 		case <-limit:
+			if !recordingStarted.IsZero() {
+				recorded = time.Since(recordingStarted)
+			}
 			c.Stop()
 			stopping = true
 			limit = nil

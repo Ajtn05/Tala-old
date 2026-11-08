@@ -176,6 +176,10 @@ func validateCookieRows(path string) error {
 }
 
 func ytDLPOutput(ctx context.Context, auth URLAuth, args ...string) ([]byte, error) {
+	return ytDLPExecute(ctx, auth, args, func(args []string) ([]byte, error) { return output(ctx, "yt-dlp", args...) })
+}
+
+func ytDLPExecute(ctx context.Context, auth URLAuth, args []string, execute func([]string) ([]byte, error)) ([]byte, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -201,7 +205,7 @@ func ytDLPOutput(ctx context.Context, auth URLAuth, args ...string) ([]byte, err
 		}
 		prefix = append(prefix, "--cookies-from-browser", selector)
 	}
-	b, err := output(ctx, "yt-dlp", append(prefix, args...)...)
+	b, err := execute(append(prefix, args...))
 	if err == nil || ctx.Err() != nil {
 		return b, err
 	}

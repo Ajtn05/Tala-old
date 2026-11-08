@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"tala/internal/audio"
 	"tala/internal/media"
@@ -211,6 +212,65 @@ func TestInvalidRangesNeverEnterQueue(t *testing.T) {
 	}
 	if len(c.Jobs()) != 0 {
 		t.Fatal("invalid import persisted")
+	}
+}
+
+func TestCustomImportTitleSurvivesMetadataSessionAndRetry(t *testing.T) {
+	t.Setenv("TALA_DATA_DIR", t.TempDir())
+	dir := t.TempDir()
+	t.Setenv("PATH", dir)
+	scripts := map[string]string{
+		"yt-dlp":  "#!/bin/sh\nmetadata=0\nprev=''\nfor arg in \"$@\"; do\n[ \"$arg\" = '--skip-download' ] && metadata=1\n[ \"$prev\" = '-o' ] && output=\"$arg\"\nprev=\"$arg\"\ndone\nif [ \"$metadata\" = 1 ]; then\nprintf '%s' '{\"title\":\"Remote source title\",\"duration\":12}'\nelse\nprintf 'fixture' > \"${output%.*}.wav\"\nprintf '%s\\n' '__TALA_DOWNLOAD__{\"status\":\"finished\",\"downloaded\":100,\"total\":100}'\nfi\n",
+		"ffprobe": "#!/bin/sh\nprintf '%s' '{\"streams\":[{\"codec_type\":\"audio\"}],\"format\":{\"duration\":\"12\",\"format_name\":\"wav\"}}'\n",
+		"ffmpeg":  "#!/bin/sh\nprintf '\\000\\000\\000\\000'\n",
+	}
+	for name, script := range scripts {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(script), 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	c := controller(t)
+	for _, tc := range []struct{ input, want string }{{"  My lecture — 講義  ", "My lecture — 講義"}, {"", "Remote source title"}} {
+		job, err := c.EnqueueWithOptions("https://example.org/lecture", "url", ImportOptions{Title: tc.input})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if job.CustomTitle != strings.TrimSpace(tc.input) {
+			t.Fatal("custom title not captured before queueing")
+		}
+		// The media fixtures run through download, probe, and session creation.
+		// Inference then stops at the expected missing-model boundary.
+		if err := c.process(c.ctx, job); err == nil || !strings.Contains(err.Error(), "model verification") {
+			t.Fatalf("unexpected process result: %v", err)
+		}
+		jobs := c.Jobs()
+		got := jobs[len(jobs)-1]
+		if got.Title != tc.want || got.Download.Downloaded != 100 {
+			t.Fatalf("metadata overwrote custom title or lost transfer stats: %+v", got)
+		}
+		v, err := c.Store.Get(got.SessionID)
+		if err != nil || v.Title != tc.want || v.Source != job.Source {
+			t.Fatalf("session title/source: %+v %v", v, err)
+		}
+		c.changeJob(job.ID, func(j *Job) { j.State = "failed" })
+		if err := c.Retry(job.ID); err != nil {
+			t.Fatal(err)
+		}
+		data, err := os.ReadFile(c.queuePath())
+		if err != nil {
+			t.Fatal(err)
+		}
+		var saved []Job
+		if err := json.Unmarshal(data, &saved); err != nil {
+			t.Fatal(err)
+		}
+		retry := saved[len(saved)-1]
+		if retry.Title != tc.want || retry.CustomTitle != strings.TrimSpace(tc.input) || retry.Download != (media.DownloadProgress{}) {
+			t.Fatalf("retry lost title or retained stale download stats: %+v", retry)
+		}
+	}
+	if _, err := c.EnqueueWithOptions("https://example.org/lecture", "url", ImportOptions{Title: strings.Repeat("x", 201)}); err == nil {
+		t.Fatal("accepted oversized title")
 	}
 }
 func TestSlowSubscriberDoesNotBlockAndRecoversLastEvent(t *testing.T) {
