@@ -305,6 +305,7 @@ The [Build and test workflow](https://github.com/Ajtn05/Tala/actions/workflows/b
 ```sh
 make test
 make race
+make test-setup # Offline native setup/cache recovery checks for macOS and Linux
 make test-ui # Optional Node.js development check for file-drop handlers
 # Optional real-inference parity and CPU-thread timing comparison (macOS needs Metal access):
 TALA_TEST_MODEL="/path/to/ggml-large-v3-turbo.bin" make test-import-speed

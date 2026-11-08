@@ -32,13 +32,16 @@ jobs:
           go-version: "1.25"
       - name: Install Linux build and media dependencies
         run: sudo apt-get update && sudo apt-get install -y build-essential cmake pkg-config libasound2-dev ffmpeg
+      - name: Check native setup recovery
+        run: make test-setup
       - name: Cache native Linux builds
         uses: actions/cache@v4
         with:
           path: |
-            third_party/whisper.cpp/build
-            third_party/portaudio/build
-          key: native-linux-${{ runner.arch }}-${{ hashFiles('WHISPER_VERSION', 'scripts/setup-deps.sh') }}
+            third_party/whisper.cpp
+            third_party/portaudio
+            third_party/portaudio_static
+          key: native-sources-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('WHISPER_VERSION', 'scripts/setup-deps.sh') }}
       - name: Build and test headless CLI
         run: |
           make setup
@@ -64,13 +67,17 @@ jobs:
         with:
           go-version: "1.25"
 
+      - name: Check native setup recovery
+        run: make test-setup
+
       - name: Cache native builds
         uses: actions/cache@v4
         with:
           path: |
-            third_party/whisper.cpp/build
-            third_party/portaudio/build
-          key: native-${{ runner.arch }}-${{ hashFiles('WHISPER_VERSION', 'scripts/setup-deps.sh') }}
+            third_party/whisper.cpp
+            third_party/portaudio
+            third_party/portaudio_static
+          key: native-sources-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('WHISPER_VERSION', 'scripts/setup-deps.sh') }}
 
       - name: Build pinned native dependencies
         run: make setup
