@@ -342,7 +342,7 @@ The WKWebView loads only bundled assets and uses a narrow native script bridge, 
 
 ## Verification
 
-The [Build and test workflow](https://github.com/Ajtn05/Tala/actions/workflows/build.yml) builds and tests macOS and Linux packages on pushes to `main`, pull requests, and manual runs. Each platform uploads its package as a workflow artifact. Version tags such as `v2.1.0` publish a release with both packages and SHA-256 checksums after both platform jobs pass. The macOS bundle version matches the release tag; routine CI builds do not create releases.
+The [Build and test workflow](https://github.com/Ajtn05/Tala/actions/workflows/build.yml) builds and tests macOS and Linux packages on pushes to `main`, pull requests, and manual runs. Each platform uploads its package as a workflow artifact. Version tags such as `v2.2.0` publish a release with both packages and SHA-256 checksums after both platform jobs pass. The macOS bundle version matches the release tag; routine CI builds do not create releases.
 
 ```sh
 make test
