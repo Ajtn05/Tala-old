@@ -2,9 +2,9 @@
 # Build side by side with the original Kian. Never remove an application or model.
 set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-TALA_VERSION="${TALA_VERSION:-2.0.0}"
+TALA_VERSION="${TALA_VERSION:-2.1.0}"
 if [[ ! "$TALA_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-    echo "TALA_VERSION must use major.minor.patch, for example 2.0.0."
+    echo "TALA_VERSION must use major.minor.patch, for example 2.1.0."
     exit 1
 fi
 cd "$ROOT_DIR"
