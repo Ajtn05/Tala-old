@@ -29,6 +29,10 @@ func (v *inputs) String() string         { return strings.Join(*v, ", ") }
 func (v *inputs) Set(value string) error { *v = append(*v, value); return nil }
 
 type options struct {
+	start, end, cookieBrowser, cookieProfile                             string
+	cookieBrowserSet                                                     bool
+	cookiesFile                                                          string
+	selection                                                            media.TimeRange
 	checkDependencies, checkModel, ensureModel, record, list, singleLine bool
 	input                                                                inputs
 	output, model, language, prompt, source, format, textMode, export    string
@@ -48,6 +52,11 @@ func parseOptions(args []string, stderr io.Writer) (options, error) {
 	f.BoolVar(&o.checkModel, "check-model", false, "Verify an existing model without downloading")
 	f.BoolVar(&o.ensureModel, "ensure-model", false, "Verify a model; download only if none exists")
 	f.Var(&o.input, "transcribe", "Transcribe FILE_OR_URL without the dashboard (repeatable)")
+	f.StringVar(&o.start, "start", "", "Start at seconds, MM:SS, or HH:MM:SS (imports only)")
+	f.StringVar(&o.end, "end", "", "Stop at this source timestamp (blank: media end; imports only)")
+	f.StringVar(&o.cookieBrowser, "cookies-from-browser", "", "Use this signed-in browser for URLs; empty disables saved sign-in")
+	f.StringVar(&o.cookieProfile, "browser-profile", "", "Browser profile name/path for --cookies-from-browser")
+	f.StringVar(&o.cookiesFile, "cookies", "", "Local Netscape cookies.txt export for Dia or other browsers (original is preserved)")
 	f.StringVar(&o.output, "output", "", "Directory for saved sessions (TALA_OUTPUT_DIR overrides the platform default)")
 	f.StringVar(&o.model, "model", "", "Existing Large v3 Turbo GGML model path")
 	f.StringVar(&o.language, "language", "", "auto, en, or tl (default: saved setting or auto)")
@@ -64,11 +73,34 @@ func parseOptions(args []string, stderr io.Writer) (options, error) {
 		return o, err
 	}
 	f.Visit(func(v *flag.Flag) {
+		if v.Name == "cookies-from-browser" {
+			o.cookieBrowserSet = true
+		}
 		if v.Name == "prompt" {
 			o.promptSet = true
 		}
 	})
 	o.input = append(o.input, f.Args()...)
+	var rangeErr error
+	o.selection, rangeErr = media.ParseRange(o.start, o.end)
+	if rangeErr != nil {
+		return o, rangeErr
+	}
+	if (o.start != "" || o.end != "") && len(o.input) == 0 {
+		return o, errors.New("--start and --end require transcription inputs")
+	}
+	if o.cookiesFile != "" && !o.cookieBrowserSet {
+		o.cookieBrowser = "other"
+		o.cookieBrowserSet = true
+	}
+	if o.cookieBrowserSet || o.cookieProfile != "" {
+		if len(o.input) == 0 {
+			return o, errors.New("browser sign-in options require transcription inputs")
+		}
+		if err := (media.URLAuth{Browser: o.cookieBrowser, Profile: o.cookieProfile, CookiesFile: o.cookiesFile}).Validate(); err != nil {
+			return o, err
+		}
+	}
 	if o.singleLine {
 		o.textMode = "continuous"
 	}
@@ -223,6 +255,9 @@ func execute(ctx context.Context, o options, manager models.Manager, stdout, std
 	}
 	setupLogging(o.output)
 	settings := manager.Settings()
+	if o.cookieBrowserSet {
+		settings.URLAuth = media.URLAuth{Browser: o.cookieBrowser, Profile: o.cookieProfile, CookiesFile: o.cookiesFile}
+	}
 	if o.language != "" {
 		settings.Language = o.language
 	}
@@ -274,7 +309,7 @@ func execute(ctx context.Context, o options, manager models.Manager, stdout, std
 		return exportSession(store, id, o, stdout)
 	}
 	for i, input := range o.input {
-		job, err := c.Enqueue(input, inputKind(input), false)
+		job, err := c.EnqueueRange(input, inputKind(input), false, o.selection)
 		if err != nil {
 			return err
 		}

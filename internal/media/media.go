@@ -123,10 +123,13 @@ func Probe(ctx context.Context, path string) (Metadata, error) {
 	return Metadata{Title: strings.TrimSuffix(filepath.Base(path), filepath.Ext(path)), Duration: duration, Format: v.Format.Name}, nil
 }
 func Fetch(ctx context.Context, raw string) (Metadata, error) {
+	return FetchWithAuth(ctx, raw, URLAuth{})
+}
+func FetchWithAuth(ctx context.Context, raw string, auth URLAuth) (Metadata, error) {
 	if e := ValidateURL(raw); e != nil {
 		return Metadata{}, e
 	}
-	b, e := output(ctx, "yt-dlp", "--ignore-config", "--no-playlist", "--skip-download", "--dump-single-json", "--no-warnings", "--", raw)
+	b, e := ytDLPOutput(ctx, auth, "--no-playlist", "--skip-download", "--dump-single-json", "--no-warnings", "--", raw)
 	if e != nil {
 		return Metadata{}, e
 	}
@@ -145,10 +148,13 @@ func Fetch(ctx context.Context, raw string) (Metadata, error) {
 	return Metadata{v.Title, v.Duration, "URL", raw, v.Thumbnail}, nil
 }
 func Download(ctx context.Context, raw, dir string) (string, error) {
+	return DownloadWithAuth(ctx, raw, dir, URLAuth{})
+}
+func DownloadWithAuth(ctx context.Context, raw, dir string, auth URLAuth) (string, error) {
 	if e := ValidateURL(raw); e != nil {
 		return "", e
 	}
-	_, e := output(ctx, "yt-dlp", "--ignore-config", "--no-playlist", "--no-progress", "--no-warnings", "-f", "bestaudio/best", "-o", filepath.Join(dir, "source.%(ext)s"), "--", raw)
+	_, e := ytDLPOutput(ctx, auth, "--no-playlist", "--no-progress", "--no-warnings", "-f", "bestaudio/best", "-o", filepath.Join(dir, "source.%(ext)s"), "--", raw)
 	if e != nil {
 		return "", e
 	}
@@ -168,13 +174,30 @@ func Download(ctx context.Context, raw, dir string) (string, error) {
 // It retains at most two 30-second PCM chunks and one raw decoding buffer.
 // Consecutive windows do not overlap, and consume is always called sequentially.
 func Stream(ctx context.Context, path string, consume func([]float32, float64) error) error {
+	return StreamRange(ctx, path, TimeRange{}, consume)
+}
+
+// StreamRange decodes only the selected audio and reports original-media offsets.
+func StreamRange(ctx context.Context, path string, selection TimeRange, consume func([]float32, float64) error) error {
+	if err := selection.Validate(0); err != nil {
+		return err
+	}
 	decodeCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	abs, e := filepath.Abs(path)
 	if e != nil {
 		return e
 	}
-	cmd, e := command(decodeCtx, "ffmpeg", "-nostdin", "-v", "error", "-i", abs, "-map", "0:a:0", "-vn", "-ac", "1", "-ar", "16000", "-f", "f32le", "pipe:1")
+	args := []string{"-nostdin", "-v", "error"}
+	if selection.Start > 0 {
+		args = append(args, "-ss", strconv.FormatFloat(selection.Start, 'f', -1, 64))
+	}
+	args = append(args, "-i", abs)
+	if selection.End > 0 {
+		args = append(args, "-t", strconv.FormatFloat(selection.End-selection.Start, 'f', -1, 64))
+	}
+	args = append(args, "-map", "0:a:0", "-vn", "-ac", "1", "-ar", "16000", "-f", "f32le", "pipe:1")
+	cmd, e := command(decodeCtx, "ffmpeg", args...)
 	if e != nil {
 		return e
 	}
@@ -211,7 +234,7 @@ func Stream(ctx context.Context, path string, consume func([]float32, float64) e
 		if e = ctx.Err(); e != nil {
 			return e
 		}
-		if e = consume(chunk.samples, chunk.offset); e != nil {
+		if e = consume(chunk.samples, selection.Start+chunk.offset); e != nil {
 			return e
 		}
 		offset = chunk.offset + float64(len(chunk.samples))/16000

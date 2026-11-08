@@ -15,6 +15,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"tala/internal/media"
 )
 
 const Name = "ggml-large-v3-turbo.bin"
@@ -22,11 +24,12 @@ const SHA256 = "1fc70f774d38eb169993ac391eea357ef47c88757ef72ee5943879b7e8e2bc69
 const URL = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/" + Name
 
 type Settings struct {
-	ModelPath   string `json:"modelPath"`
-	ModelDir    string `json:"modelDir"`
-	Language    string `json:"language"`
-	Prompt      string `json:"prompt"`
-	MenuBarIcon bool   `json:"menuBarIcon"`
+	ModelPath   string        `json:"modelPath"`
+	ModelDir    string        `json:"modelDir"`
+	Language    string        `json:"language"`
+	Prompt      string        `json:"prompt"`
+	MenuBarIcon bool          `json:"menuBarIcon"`
+	URLAuth     media.URLAuth `json:"urlAuth,omitempty"`
 }
 type Status struct {
 	Path   string `json:"path"`

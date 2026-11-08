@@ -65,8 +65,8 @@ The model is saved at `~/Library/Application Support/Kian/models/ggml-large-v3-t
 Leave **Settings → Language → Automatic / multilingual** selected for mixed-language speech, including Taglish. Optional English and Filipino/Tagalog settings are available for recordings in one language. The same language settings apply to live, file, and URL transcription.
 
 - **Live:** open **New transcription**, select your audio source in the live transcription bar, and click **Start recording**. Grant microphone/audio capture access when requested, then click **Stop recording** when finished.
-- **File:** on **New transcription**, drop an audio/video file into the upload area or click **choose files**, review its details, and click **Add to queue**.
-- **URL:** paste a supported media URL into the link field on **New transcription**, click **Fetch details**, then **Add to queue**.
+- **File:** on **New transcription**, drop an audio/video file into the upload area or click **choose files**, review its details, optionally set **Start** and **End**, and click **Add to queue**.
+- **URL:** paste a supported media URL into the link field on **New transcription**, click **Fetch details**, optionally set **Start** and **End**, then **Add to queue**. For links requiring an account, expand **URL sign-in helper**.
 
 The home screen shows the processing queue and recent sessions in lists that expand with the window height. Scroll either list to see more entries. Use **Sessions** or **Queue** in the top navigation to view the full lists; Settings is alongside them in the top navigation. Open a session to edit, copy, or export it. **Copy text**, **Format**, and **Export file…** stay at the bottom of the window while the transcript scrolls. Transcripts are saved in `~/Documents/Kian/`; allow Documents access if macOS asks. After initial setup, live recording and local-file transcription work offline. URL imports require internet access.
 
@@ -178,6 +178,17 @@ The same CLI commands work on macOS. Put options before positional inputs; quote
 ./tala --language auto --prompt 'Ateneo, Kubernetes, barangay' --transcribe lecture.mp4
 ./tala --transcribe 'https://example.org/media'
 
+# Transcribe only the selected part; timestamps remain on the original timeline.
+./tala --start 1:30 --end 5:00 --transcribe lecture.mp4
+./tala --cookies-from-browser firefox --start 90 --end 300 --transcribe 'https://example.org/media'
+# Optional profile selection; these options do not change saved settings.
+./tala --cookies-from-browser chrome --browser-profile 'Profile 1' --transcribe 'https://example.org/media'
+./tala --cookies-from-browser zen --transcribe 'https://example.org/media'
+# Dia or another unlisted browser: use a Netscape cookie export.
+./tala --cookies /path/to/cookies.txt --transcribe 'https://example.org/media'
+# Disable saved browser sign-in for this invocation.
+./tala --cookies-from-browser= --transcribe 'https://example.org/media'
+
 # Process multiple inputs sequentially with one model.
 ./tala --format json first.wav second.mp4 > sessions.json
 # Multiple JSON results form a stream of JSON documents, not one JSON array.
@@ -262,7 +273,34 @@ They are external tools, not bundled. Tala finds them in PATH, `/opt/homebrew/bi
 
 On New transcription, select multiple files or drag them from Finder into the upload area, review their actual audio format and duration, then add them to the queue. FFmpeg decodes the first audio stream from common audio/video containers. Audio is streamed as 16 kHz mono float PCM in non-overlapping 30-second windows, without playback or deliberate delays. Decoding reads one window ahead while Whisper processes the current window. Windows containing only exact zero samples skip inference while preserving their place in the timeline; any nonzero sample, however quiet, still reaches Whisper. Memory use for decoding is bounded; a whole long video is never loaded into RAM. Recognition near a window boundary may be less accurate than within a window.
 
-For a URL, fetch its metadata, review the title and duration, and add it to the queue. Accessible YouTube videos, Shorts, direct media URLs, and sites supported by the installed yt-dlp are supported. Playlists are limited to one selected video; multi-video playlist expansion is not implemented. Restricted, private, DRM-protected, unavailable, and network-failed media report tool errors. Tala does not supply credentials or bypass access controls. Only import content you are authorized to access.
+For a URL, fetch its metadata, review the title and duration, and add it to the queue. Accessible YouTube videos, Shorts, direct media URLs, and sites supported by the installed yt-dlp are supported. Playlists are limited to one selected video; multi-video playlist expansion is not implemented. Restricted, private, DRM-protected, unavailable, and network-failed media report tool errors. Browser sign-in is optional and off by default. It uses your existing browser session through yt-dlp and does not bypass site access controls. Only import content you are authorized to access.
+
+### Select a time range
+
+Each reviewed file and fetched link has optional **Start** and **End** fields. Enter seconds (`90`), minutes and seconds (`1:30`), or hours, minutes, and seconds (`1:02:30`), with up to three decimal places for milliseconds. Blank Start means the beginning; blank End means the end of the media. End must be after Start and within the known media duration. Each file can have its own range.
+
+Only the selected audio is decoded and transcribed. Progress and session duration count the selected audio, while transcript timestamps, playback seeks, and SRT/VTT exports retain the original media times. A `1:30`–`5:00` selection processes 3 minutes 30 seconds and begins its transcript at or after `1:30`. Ranges survive retries and app restarts. Original files remain unchanged. URL imports currently download the full source before decoding the selection; retained media also stays complete for accurate playback.
+
+The CLI supports the same selection with `--start` and `--end`, applied to every input in that invocation. These flags apply only to imports; `--duration` remains the live-recording limit.
+
+### URL sign-in helper
+
+Expand **URL sign-in helper** below the link field, or in **Settings → Media tools**:
+
+1. Choose the browser where the media plays while signed in. Optionally enter a profile name or path, such as `Default` or `Profile 1`; leaving it blank lets yt-dlp choose the most recently used profile. Safari does not support profile selection here.
+2. Click **Open site to sign in**, or **Copy URL** and paste it into any browser. Switch to the intended browser profile if necessary, and sign in on the website.
+3. Click **Save sign-in settings**, then **Fetch details** again. Retry failed queue items after correcting sign-in settings.
+
+The selection applies to metadata lookup and new URL downloads. Active downloads keep their current selection. Choose **Off — public links** and save to disable it. Tala saves only the browser/profile selection or a selected cookie-file path; it does not collect passwords or export browser cookies. The [yt-dlp browser-cookie option](https://github.com/yt-dlp/yt-dlp#filesystem-options) reads the browser session locally when needed. If extraction fails, close the browser and retry, and check macOS Keychain or file-access prompts. Some restrictions still require an updated yt-dlp or remain unsupported. See the [upstream cookie guidance](https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp).
+
+
+**Zen:** select **Zen** for automatic discovery of its own profile directory on macOS or Linux. Tala uses yt-dlp's Firefox-compatible reader with that directory; it does not read your Firefox profile instead. For a specific or nonstandard installation, open `about:support` in Zen and paste its **Profile Folder** path into Tala's profile field.
+
+**Dia and other browsers:** select **Dia (cookies.txt)** or **Other browser (cookies.txt)**. Dia opens with the native browser action; Other uses your default browser. **Copy URL** also works with any browser. After signing in, export that site's cookies in Netscape `cookies.txt` format and use **Choose file…** (or enter its local path). **How to export cookies** opens the upstream instructions. Then save and fetch details again. This is cookie-file support for Dia; automatic extraction from Dia's encrypted cookie store is not implemented. Pasting a page URL alone cannot share a signed-in session.
+
+Cookie exports grant account access: keep them private. Tala passes a private temporary copy to yt-dlp because yt-dlp may update its cookie jar. The copy is removed on completion, failure, or cancellation, and the selected original is never modified. A forced process kill can leave a private OS temporary directory. Expired exports must be refreshed in the browser. The CLI's `--cookies PATH` uses the same behavior, without changing saved settings.
+
+### Downloads and queue
 
 URL audio is downloaded into a private temporary directory. Temporary downloads are removed on success, error, and cancellation. An explicit Keep downloaded media option retains one durable copy under Documents/Kian/media for review. Original local files are referenced in place and never deleted. A crash or forced kill can leave an OS temporary directory; it does not affect original media.
 
@@ -288,7 +326,7 @@ Automatic multilingual detection is the default for English, Filipino, and Tagli
 - `~/Documents/Kian/sessions/<id>.jsonl`: append-only finalized segment journal, synced on append. Complete records survive a truncated final record.
 - `~/Documents/Kian/transcript_*.txt`: compatible live text output; existing files are imported without modification or fabricated timestamps.
 - `~/Documents/Kian/queue.json`: atomically written queue metadata.
-- `~/Library/Application Support/Kian/settings.json`: model path, model directory, recognition options, optional menu bar icon (off by default).
+- `~/Library/Application Support/Kian/settings.json`: model path, model directory, recognition options, optional menu bar icon, and URL browser/profile selection or cookie-file path (browser sign-in is off by default).
 - `~/Library/Application Support/Kian/models/`: verified downloads only.
 - macOS preferences: window geometry, selected session, display mode, font size.
 

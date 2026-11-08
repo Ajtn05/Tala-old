@@ -247,12 +247,13 @@ func (h *Host) dispatch(r request) (any, error) {
 			Sources []string
 			Kind    string
 			Retain  bool
+			Range   media.TimeRange
 		}
 		if e := decode(r.Data, &d); e != nil {
 			return nil, e
 		}
 		for _, p := range d.Sources {
-			if e := c.Add(p, d.Kind, d.Retain); e != nil {
+			if _, e := c.EnqueueRange(p, d.Kind, d.Retain, d.Range); e != nil {
 				return nil, e
 			}
 		}
@@ -281,12 +282,42 @@ func (h *Host) dispatch(r request) (any, error) {
 		if r.Action == "probe" {
 			return probe(ctx, source)
 		}
-		return fetch(ctx, source)
+		return media.FetchWithAuth(ctx, source, c.URLAuth())
+	case "urlAuth":
+		var auth media.URLAuth
+		if e := decode(r.Data, &auth); e != nil {
+			return nil, e
+		}
+		return nil, c.SetURLAuth(auth)
+	case "openSignIn":
+		var d struct {
+			URL     string
+			Browser string
+		}
+		if e := decode(r.Data, &d); e != nil {
+			return nil, e
+		}
+		return nil, openSignIn(d.URL, d.Browser)
 	case "pickFiles":
 		C.dashboardPickFiles(0)
 		return nil, nil
 	case "pickModel":
 		C.dashboardPickFiles(1)
+		return nil, nil
+	case "pickCookies":
+		C.dashboardPickFiles(2)
+		return nil, nil
+	case "copySignInURL":
+		var raw string
+		if e := decode(r.Data, &raw); e != nil {
+			return nil, e
+		}
+		if e := media.ValidateURL(raw); e != nil {
+			return nil, e
+		}
+		p := str(raw)
+		defer C.free(unsafe.Pointer(p))
+		C.dashboardCopyURL(p)
 		return nil, nil
 	case "settings":
 		var s models.Settings

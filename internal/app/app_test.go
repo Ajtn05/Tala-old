@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sync"
 	"tala/internal/audio"
+	"tala/internal/media"
 	"tala/internal/models"
 	"tala/internal/session"
 	"testing"
@@ -63,6 +64,40 @@ func TestMenuBarPreferenceWithoutModelAndWhileRecording(t *testing.T) {
 	}
 	if c.Models.Settings().MenuBarIcon {
 		t.Fatal("icon was not disabled")
+	}
+}
+
+func TestURLSignInPreferencePreservesSettingsDuringActiveWork(t *testing.T) {
+	t.Setenv("TALA_DATA_DIR", t.TempDir())
+	c := controller(t)
+	want := models.Settings{Language: "tl", Prompt: "Ateneo", ModelDir: "/existing/models", MenuBarIcon: true}
+	if err := c.Models.Save(want); err != nil {
+		t.Fatal(err)
+	}
+	c.live.Active, c.activeJob = true, "active"
+	auth := media.URLAuth{Browser: "chrome", Profile: "Profile 1"}
+	if err := c.SetURLAuth(auth); err != nil {
+		t.Fatal(err)
+	}
+	want.URLAuth = auth
+	if got := c.Models.Settings(); got != want {
+		t.Fatalf("unrelated settings changed: %+v", got)
+	}
+	if err := c.SetURLAuth(media.URLAuth{Browser: "bad"}); err == nil {
+		t.Fatal("accepted invalid browser")
+	}
+	if c.URLAuth() != auth {
+		t.Fatal("invalid change overwrote auth")
+	}
+	c.recognition = &models.Settings{Language: "auto", URLAuth: media.URLAuth{Browser: "firefox"}}
+	if c.URLAuth().Browser != "firefox" {
+		t.Fatal("invocation override ignored")
+	}
+	if err := c.SetURLAuth(media.URLAuth{}); err != nil {
+		t.Fatal(err)
+	}
+	if c.Models.Settings().URLAuth != (media.URLAuth{}) {
+		t.Fatal("could not disable sign-in")
 	}
 }
 func TestHeadlessLeavesEarlierWaitingJobsAlone(t *testing.T) {
@@ -132,7 +167,8 @@ func TestPausedBatchCanBeCancelled(t *testing.T) {
 }
 func TestQueueCancellationRetryAndPersistence(t *testing.T) {
 	c := controller(t)
-	c.jobs = []Job{{ID: "job", State: "waiting"}}
+	selection := media.TimeRange{Start: 15, End: 45}
+	c.jobs = []Job{{ID: "job", State: "waiting", Range: selection}}
 	if e := c.CancelJob("job"); e != nil {
 		t.Fatal(e)
 	}
@@ -154,6 +190,9 @@ func TestQueueCancellationRetryAndPersistence(t *testing.T) {
 	if jobs[0].State != "waiting" {
 		t.Fatal("state not persisted")
 	}
+	if jobs[0].Range != selection {
+		t.Fatal("retry lost selected range")
+	}
 	ctx, cancel := context.WithCancel(c.ctx)
 	c.cancelJob = cancel
 	c.activeJob = "job"
@@ -162,6 +201,16 @@ func TestQueueCancellationRetryAndPersistence(t *testing.T) {
 	}
 	if ctx.Err() != context.Canceled {
 		t.Fatal("running job context not cancelled")
+	}
+}
+
+func TestInvalidRangesNeverEnterQueue(t *testing.T) {
+	c := controller(t)
+	if _, err := c.EnqueueRange("https://example.org/audio", "url", false, media.TimeRange{Start: 20, End: 10}); err == nil {
+		t.Fatal("invalid range entered queue")
+	}
+	if len(c.Jobs()) != 0 {
+		t.Fatal("invalid import persisted")
 	}
 }
 func TestSlowSubscriberDoesNotBlockAndRecoversLastEvent(t *testing.T) {

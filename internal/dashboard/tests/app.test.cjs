@@ -29,7 +29,8 @@ function harness({ deferActions = [], snapshot: overrides = {} } = {}) {
     if (request.action === "clearQueue") snapshot.jobs = [];
     const result = request.action === "snapshot" ? snapshot
       : request.action === "dependencies" ? snapshot.dependencies
-      : request.action === "probe" ? { duration: 11, format: "mp3" } : null;
+      : request.action === "probe" ? { duration: 11, format: "mp3" }
+      : request.action === "metadata" ? { url: request.data, title: "Lecture", duration: 125 } : null;
     queueMicrotask(() => window.receive({ type: "reply", data: { id: request.id, result } }));
   } } } };
   const context = vm.createContext({ window, document, setInterval() {}, setTimeout() {}, clearTimeout() {} });
@@ -224,4 +225,176 @@ test("clearing an active queue requires confirmation and uses the native clear a
   await h.element("#clear-queue").onclick();
   assert.equal(h.requests.filter(r => r.action === "clearQueue").length, 1);
   assert.equal(vm.runInContext('state.jobs.length', h.context), 0);
+});
+
+test("file ranges preserve drafts and independently select source intervals", async () => {
+  const h = harness();
+  await flush();
+  h.window.receive({ type: "files", data: ["/first.wav", "/second.wav"] });
+  await flush();
+  h.element("#file-range-0-start").oninput({ target: { value: "00:02.500" } });
+  h.element("#file-range-0-end").oninput({ target: { value: "9" } });
+  h.element("#file-range-1-end").oninput({ target: { value: "5" } });
+  vm.runInContext('navigate("settings"); navigate("new")', h.context);
+  assert.match(h.element("#files").innerHTML, /value="00:02.500"/);
+  await h.element("#enqueue-files").onclick();
+  const jobs = h.requests.filter(r => r.action === "enqueue").map(r => JSON.parse(JSON.stringify(r.data)));
+  assert.deepEqual(jobs, [
+    { sources: ["/first.wav"], kind: "file", range: { start: 2.5, end: 9 } },
+    { sources: ["/second.wav"], kind: "file", range: { start: 0, end: 5 } },
+  ]);
+});
+
+test("invalid ranges never enqueue files or links", async () => {
+  const h = harness();
+  await flush();
+  h.window.receive({ type: "files", data: ["/first.wav"] });
+  await flush();
+  h.element("#file-range-0-end").oninput({ target: { value: "12" } });
+  await h.element("#enqueue-files").onclick();
+  assert.equal(h.requests.some(r => r.action === "enqueue"), false);
+  assert.equal(vm.runInContext("files.length", h.context), 1);
+  typeURL(h, "https://example.org/audio");
+  await h.element("#fetch-url").onclick();
+  h.element("#url-range-start").oninput({ target: { value: "30" } });
+  h.element("#url-range-end").oninput({ target: { value: "20" } });
+  await h.element("#enqueue-url").onclick();
+  assert.equal(h.requests.some(r => r.action === "enqueue"), false);
+  assert.equal(h.element("#enqueue-url").disabled, false);
+});
+
+test("partially queued files are removed so retry cannot duplicate successful imports", async () => {
+  const h = harness({ deferActions: ["enqueue"] });
+  await flush();
+  h.window.receive({ type: "files", data: ["/first.wav", "/second.wav"] });
+  await flush();
+  const adding = h.element("#enqueue-files").onclick();
+  const first = h.requests.at(-1);
+  h.window.receive({ type: "reply", data: { id: first.id, result: null } });
+  await flush();
+  const second = h.requests.at(-1);
+  h.window.receive({ type: "reply", data: { id: second.id, error: "File moved" } });
+  await adding;
+  assert.equal(vm.runInContext("files.length", h.context), 1);
+  assert.equal(vm.runInContext("files[0].path", h.context), "/second.wav");
+});
+
+test("URL ranges survive background updates and reset when the URL changes", async () => {
+  const h = harness();
+  await flush();
+  typeURL(h, "https://example.org/audio");
+  await h.element("#fetch-url").onclick();
+  h.element("#url-range-start").oninput({ target: { value: "1:00.250" } });
+  h.element("#url-range-end").oninput({ target: { value: "2:00" } });
+  h.window.receive({ type: "jobs", data: [] });
+  vm.runInContext('navigate("settings"); navigate("new")', h.context);
+  assert.match(h.element("#url-details").innerHTML, /value="1:00.250"/);
+  await h.element("#enqueue-url").onclick();
+  const job = h.requests.find(r => r.action === "enqueue");
+  assert.deepEqual(JSON.parse(JSON.stringify(job.data.range)), { start: 60.25, end: 120 });
+  vm.runInContext('navigate("new")', h.context);
+  typeURL(h, "https://example.org/second");
+  assert.equal(vm.runInContext("urlRange.start", h.context), "");
+});
+
+test("an in-flight URL enqueue cannot duplicate work or clear a newer link", async () => {
+  const h = harness({ deferActions: ["enqueue"] });
+  await flush();
+  typeURL(h, "https://example.org/first");
+  await h.element("#fetch-url").onclick();
+  const adding = h.element("#enqueue-url").onclick();
+  const request = h.requests.at(-1);
+  vm.runInContext('navigate("settings"); navigate("new")', h.context);
+  await h.element("#enqueue-url").onclick();
+  assert.equal(h.requests.filter(r => r.action === "enqueue").length, 1);
+  typeURL(h, "https://example.org/second");
+  h.window.receive({ type: "reply", data: { id: request.id, result: null } });
+  await adding;
+  assert.equal(vm.runInContext("urlDraft", h.context), "https://example.org/second");
+  assert.equal(vm.runInContext("view", h.context), "new");
+});
+
+test("sign-in saves only browser choices and invalidates stale metadata", async () => {
+  const h = harness({ deferActions: ["metadata"] });
+  await flush();
+  typeURL(h, "https://example.org/private");
+  const lookup = h.element("#fetch-url").onclick();
+  const request = h.requests.at(-1);
+  h.element("#cookie-browser").value = "chrome";
+  h.element("#cookie-profile").value = "Profile 1";
+  await h.element("#save-url-auth").onclick();
+  const saved = h.requests.find(r => r.action === "urlAuth");
+  assert.deepEqual(JSON.parse(JSON.stringify(saved.data)), { browser: "chrome", profile: "Profile 1" });
+  h.window.receive({ type: "reply", data: { id: request.id, result: { url: "https://example.org/private", title: "Old", duration: 60 } } });
+  await lookup;
+  assert.equal(vm.runInContext("urlMeta", h.context), null);
+  h.element("#cookie-browser").value = "";
+  h.element("#cookie-browser").onchange();
+  await h.element("#save-url-auth").onclick();
+  assert.equal(vm.runInContext("state.settings.urlAuth.browser", h.context), "");
+  assert.equal(h.element("#cookie-profile").value, "");
+});
+
+test("sign-in failures expose the helper and preserve the link", async () => {
+  const h = harness({ deferActions: ["metadata"] });
+  await flush();
+  typeURL(h, "https://example.org/private");
+  const lookup = h.element("#fetch-url").onclick();
+  const request = h.requests.at(-1);
+  h.window.receive({ type: "reply", data: { id: request.id, error: "Sign in to confirm your age" } });
+  await lookup;
+  assert.equal(h.element("#url-sign-in").open, true);
+  assert.equal(h.element("#url-error").hidden, false);
+  assert.equal(vm.runInContext("urlDraft", h.context), "https://example.org/private");
+});
+
+test("timestamp parsing rejects malformed, negative, and nonfinite times", async () => {
+  const h = harness();
+  await flush();
+  for (const raw of ["-1", "1:60", "1:60:00", "NaN", "Infinity", "1e2", "1:2:3:4", "1.1234", "9223372037"]) {
+    assert.throws(() => vm.runInContext(`parseTimestamp(${JSON.stringify(raw)})`, h.context));
+  }
+  assert.equal(vm.runInContext('parseTimestamp("01:02:03.250")', h.context), 3723.25);
+  assert.throws(() => vm.runInContext('readRange({start: "", end: "0"}, 60)', h.context));
+});
+
+test("Zen is saved by name and launches its own browser with a copyable URL", async () => {
+  const h = harness();
+  await flush();
+  typeURL(h, "https://example.org/private?item=1");
+  assert.equal(h.element("#sign-in-url").value, "https://example.org/private?item=1");
+  h.element("#cookie-browser").value = "zen";
+  h.element("#cookie-browser").onchange();
+  h.element("#cookie-profile").value = "/profiles/zen/default";
+  await h.element("#open-sign-in").onclick();
+  await h.element("#copy-sign-in-url").onclick();
+  await h.element("#save-url-auth").onclick();
+  assert.deepEqual(JSON.parse(JSON.stringify(h.requests.find(r => r.action === "openSignIn").data)), {browser: "zen", url: "https://example.org/private?item=1"});
+  assert.equal(h.requests.find(r => r.action === "copySignInURL").data, "https://example.org/private?item=1");
+  assert.deepEqual(JSON.parse(JSON.stringify(h.requests.find(r => r.action === "urlAuth").data)), {browser: "zen", profile: "/profiles/zen/default"});
+});
+
+test("Dia and other browsers use chosen cookie exports and clear them when disabled", async () => {
+  const h = harness();
+  await flush();
+  h.element("#cookie-browser").value = "dia";
+  h.element("#cookie-browser").onchange();
+  assert.equal(h.element("#cookie-file-field").hidden, false);
+  assert.equal(h.element("#cookie-profile-field").hidden, true);
+  await h.element("#save-url-auth").onclick();
+  assert.equal(h.requests.some(r => r.action === "urlAuth"), false);
+  await h.element("#choose-cookies").onclick();
+  assert.equal(h.requests.at(-1).action, "pickCookies");
+  h.window.receive({ type: "cookiesFile", data: ["/exports/cookies.txt"] });
+  await h.element("#save-url-auth").onclick();
+  assert.deepEqual(JSON.parse(JSON.stringify(h.requests.find(r => r.action === "urlAuth").data)), {browser: "dia", profile: "", cookiesFile: "/exports/cookies.txt"});
+  h.element("#cookie-browser").value = "other";
+  h.element("#cookie-browser").onchange();
+  await h.element("#open-sign-in").onclick();
+  assert.equal(h.requests.at(-1).data.browser, "other");
+  h.element("#cookie-browser").value = "";
+  h.element("#cookie-browser").onchange();
+  await h.element("#save-url-auth").onclick();
+  assert.equal(h.element("#cookie-file").value, "");
+  assert.deepEqual(JSON.parse(JSON.stringify(h.requests.filter(r => r.action === "urlAuth").at(-1).data)), {browser: "", profile: ""});
 });

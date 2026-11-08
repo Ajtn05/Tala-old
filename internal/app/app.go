@@ -29,18 +29,19 @@ type Event struct {
 	Data any    `json:"data"`
 }
 type Job struct {
-	ID        string  `json:"id"`
-	Title     string  `json:"title"`
-	Source    string  `json:"source"`
-	Kind      string  `json:"kind"`
-	State     string  `json:"state"`
-	Progress  float64 `json:"progress"`
-	Duration  float64 `json:"duration"`
-	Processed float64 `json:"processed"`
-	Elapsed   float64 `json:"elapsed"`
-	Error     string  `json:"error,omitempty"`
-	SessionID string  `json:"sessionId,omitempty"`
-	Retain    bool    `json:"retain"`
+	ID        string          `json:"id"`
+	Title     string          `json:"title"`
+	Source    string          `json:"source"`
+	Kind      string          `json:"kind"`
+	State     string          `json:"state"`
+	Progress  float64         `json:"progress"`
+	Duration  float64         `json:"duration"`
+	Processed float64         `json:"processed"`
+	Elapsed   float64         `json:"elapsed"`
+	Error     string          `json:"error,omitempty"`
+	SessionID string          `json:"sessionId,omitempty"`
+	Retain    bool            `json:"retain"`
+	Range     media.TimeRange `json:"range,omitempty"`
 }
 type Live struct {
 	Active    bool       `json:"active"`
@@ -338,6 +339,12 @@ func (c *Controller) Add(source, kind string, retain bool) error {
 	return err
 }
 func (c *Controller) Enqueue(source, kind string, retain bool) (Job, error) {
+	return c.EnqueueRange(source, kind, retain, media.TimeRange{})
+}
+func (c *Controller) EnqueueRange(source, kind string, retain bool, selection media.TimeRange) (Job, error) {
+	if err := selection.Validate(0); err != nil {
+		return Job{}, err
+	}
 	if kind == "url" {
 		if e := media.ValidateURL(source); e != nil {
 			return Job{}, e
@@ -360,9 +367,18 @@ func (c *Controller) Enqueue(source, kind string, retain bool) (Job, error) {
 	if err := media.Dependencies().Require(kind); err != nil {
 		return Job{}, err
 	}
+	if kind == "file" && selection != (media.TimeRange{}) {
+		meta, err := media.Probe(c.ctx, source)
+		if err != nil {
+			return Job{}, err
+		}
+		if err := selection.Validate(meta.Duration); err != nil {
+			return Job{}, err
+		}
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	job := Job{ID: session.ID(), Title: filepath.Base(source), Source: source, Kind: kind, State: "waiting", Retain: retain}
+	job := Job{ID: session.ID(), Title: filepath.Base(source), Source: source, Kind: kind, State: "waiting", Retain: retain, Range: selection}
 	c.jobs = append(c.jobs, job)
 	if e := c.saveJobsLocked(); e != nil {
 		c.jobs = c.jobs[:len(c.jobs)-1]
@@ -536,6 +552,9 @@ func (c *Controller) worker() {
 	}
 }
 func (c *Controller) process(ctx context.Context, job Job) error {
+	if err := job.Range.Validate(0); err != nil {
+		return err
+	}
 	if err := media.Dependencies().Require(job.Kind); err != nil {
 		return err
 	}
@@ -547,18 +566,22 @@ func (c *Controller) process(ctx context.Context, job Job) error {
 	var meta media.Metadata
 	var err error
 	if job.Kind == "url" {
+		auth := c.URLAuth()
 		c.changeJob(job.ID, func(j *Job) { j.State = "downloading" })
-		meta, err = media.Fetch(ctx, job.Source)
+		meta, err = media.FetchWithAuth(ctx, job.Source, auth)
 		if err != nil {
 			return err
 		}
-		c.changeJob(job.ID, func(j *Job) { j.Title = meta.Title; j.Duration = meta.Duration })
+		if err := job.Range.Validate(meta.Duration); err != nil {
+			return err
+		}
+		c.changeJob(job.ID, func(j *Job) { j.Title = meta.Title; j.Duration = job.Range.Duration(meta.Duration) })
 		tmp, e := os.MkdirTemp("", "tala-media-*")
 		if e != nil {
 			return e
 		}
 		defer os.RemoveAll(tmp)
-		path, err = media.Download(ctx, job.Source, tmp)
+		path, err = media.DownloadWithAuth(ctx, job.Source, tmp, auth)
 		if err != nil {
 			return err
 		}
@@ -574,6 +597,10 @@ func (c *Controller) process(ctx context.Context, job Job) error {
 	if meta.Duration <= 0 {
 		meta.Duration = probed.Duration
 	}
+	if err := job.Range.Validate(probed.Duration); err != nil {
+		return err
+	}
+	selectedDuration := job.Range.Duration(probed.Duration)
 	v, e := c.Store.Create(job.Kind, meta.Title, job.Source)
 	if e != nil {
 		return e
@@ -594,13 +621,18 @@ func (c *Controller) process(ctx context.Context, job Job) error {
 		path = dest
 		mediaPath = dest
 	}
-	if e = c.Store.Update(v.ID, func(v *session.Session) error { v.MediaPath = mediaPath; v.Duration = meta.Duration; return nil }); e != nil {
+	if e = c.Store.Update(v.ID, func(v *session.Session) error {
+		v.MediaPath = mediaPath
+		v.Duration = selectedDuration
+		v.Range = job.Range
+		return nil
+	}); e != nil {
 		return e
 	}
-	c.changeJob(job.ID, func(j *Job) { j.Title = meta.Title; j.Duration = meta.Duration; j.SessionID = v.ID })
+	c.changeJob(job.ID, func(j *Job) { j.Title = meta.Title; j.Duration = selectedDuration; j.SessionID = v.ID })
 	c.Emit("sessions", nil)
 	processed := 0.0
-	err = media.Stream(ctx, path, func(samples []float32, offset float64) error {
+	err = media.StreamRange(ctx, path, job.Range, func(samples []float32, offset float64) error {
 		if e := c.waitBatch(ctx, job.ID); e != nil {
 			return e
 		}
@@ -622,12 +654,12 @@ func (c *Controller) process(ctx context.Context, job Job) error {
 				}
 			}
 		}
-		processed = end
+		processed = end - job.Range.Start
 		c.changeJob(job.ID, func(j *Job) {
-			j.Processed = end
+			j.Processed = processed
 			j.Elapsed = time.Since(started).Seconds()
-			if meta.Duration > 0 {
-				j.Progress = min(.999, end/meta.Duration)
+			if selectedDuration > 0 {
+				j.Progress = min(.999, processed/selectedDuration)
 			}
 		})
 		return ctx.Err()
@@ -688,6 +720,9 @@ func copyFile(ctx context.Context, src, dest string) error {
 func (c *Controller) Configure(s models.Settings) error {
 	c.settingsMu.Lock()
 	defer c.settingsMu.Unlock()
+	if err := s.URLAuth.Validate(); err != nil {
+		return err
+	}
 	if s.Language != "auto" && s.Language != "en" && s.Language != "tl" {
 		return errors.New("choose automatic, English, or Filipino")
 	}
@@ -724,6 +759,26 @@ func (c *Controller) Configure(s models.Settings) error {
 		return nil
 	}
 	return e
+}
+
+// URLAuth uses invocation overrides for the CLI and saved settings for the dashboard.
+func (c *Controller) URLAuth() media.URLAuth { return c.recognitionSettings().URLAuth }
+
+// SetURLAuth lets a failed import be repaired without requiring a model or idle queue.
+// Running imports keep the auth selection captured at the start of process.
+func (c *Controller) SetURLAuth(auth media.URLAuth) error {
+	if err := auth.Validate(); err != nil {
+		return err
+	}
+	c.settingsMu.Lock()
+	defer c.settingsMu.Unlock()
+	s := c.Models.Settings()
+	s.URLAuth = auth
+	if err := c.Models.Save(s); err != nil {
+		return err
+	}
+	c.Emit("settings", s)
+	return nil
 }
 
 // SetMenuBarIcon can be changed during recording and without a verified model.

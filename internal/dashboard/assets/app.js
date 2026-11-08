@@ -58,6 +58,12 @@ let view = "new",
   urlMeta = null,
   urlDraft = "",
   urlVersion = 0,
+  urlRange = { start: "", end: "" },
+  authDraft = null,
+  authOpen = false,
+  savingAuth = false,
+  enqueuingFiles = false,
+  enqueuingURL = false,
   retainMedia = false,
   startingRecording = false,
   mode = storage.getItem("displayMode") || "clean",
@@ -236,6 +242,19 @@ window.receive = function (event) {
     setFiles(d);
     return;
   }
+  if (event.type === "cookiesFile") {
+    if (d[0]) {
+      const current = authDraft || state.settings.urlAuth || {};
+      authDraft = { browser: usesCookieFile(current.browser) ? current.browser : "other", profile: "", cookiesFile: d[0] };
+      if ($("#cookie-file")) {
+        $("#cookie-browser").value = authDraft.browser;
+        $("#cookie-file").value = d[0];
+        $("#cookie-profile").value = "";
+        syncCookieFields(authDraft);
+      }
+    }
+    return;
+  }
   if (event.type === "modelFile") {
     if ($("#model-path")) $("#model-path").value = d[0] || "";
     return;
@@ -295,7 +314,7 @@ async function refreshSessions() {
             " · " +
             duration(selected.duration) +
             "\n" +
-            selected.source;
+            selected.source + (rangeLabel(selected.range) ? "\nSelected range: " + rangeLabel(selected.range) : "");
       }
       updateRecordingBanner();
     }
@@ -372,6 +391,7 @@ function renderNew() {
           <button id="fetch-url">Fetch details</button>
         </div>
         <p id="url-error" class="field-error" role="alert" hidden></p>
+        ${signInHelper()}
         <div id="url-details"></div>
       </div>
       <p id="import-availability" class="import-availability" hidden></p>
@@ -400,16 +420,19 @@ function renderNew() {
     urlDraft = e.target.value;
     urlVersion++;
     urlMeta = null;
+    urlRange = { start: "", end: "" };
     retainMedia = false;
     $("#url-details").innerHTML = "";
     $("#url-error").hidden = true;
     $("#media-url").setAttribute("aria-invalid", "false");
     syncURLButton();
+    if ($("#sign-in-url")) $("#sign-in-url").value = signInURL();
   };
   updateImportAvailability();
   refreshDependencies();
   renderFiles();
   renderURL();
+  bindSignInHelper();
 }
 function renderHomeRecording() {
   if (view !== "new") return;
@@ -532,7 +555,7 @@ function updateImportAvailability() {
   }
   if ($("#choose-files")) $("#choose-files").disabled = !report.file?.ready;
   syncURLButton();
-  if ($("#enqueue-url")) $("#enqueue-url").disabled = !report.url?.ready;
+  if ($("#enqueue-url")) $("#enqueue-url").disabled = !report.url?.ready || enqueuingURL;
 }
 
 async function refreshDependencies(retryFiles = false) {
@@ -571,7 +594,7 @@ async function setFiles(paths) {
   selected = null;
   const additions = [...new Set(paths)]
     .filter((path) => !files.some((file) => file.path === path))
-    .map((path) => ({ path, pending: true }));
+    .map((path) => ({ path, pending: true, rangeDraft: { start: "", end: "" } }));
   files.push(...additions);
   render();
   syncNavigation();
@@ -590,7 +613,7 @@ function renderFiles() {
   $("#files").innerHTML = files
     .map(
       (f, i) =>
-        `<div class="file-item"><div><strong>${escape(f.path.split("/").pop())}</strong><small ${f.error ? 'class="job-error"' : ""}>${escape(f.pending ? "Inspecting audio…" : f.error || `${duration(f.meta.duration)} · ${f.meta.format}`)}</small></div><button class="icon-button" data-remove="${i}" aria-label="Remove file">×</button></div>`,
+        `<div class="file-item"><div><strong>${escape(f.path.split("/").pop())}</strong><small ${f.error ? 'class="job-error"' : ""}>${escape(f.pending ? "Inspecting audio…" : f.error || `${duration(f.meta.duration)} · ${f.meta.format}`)}</small>${f.meta && !f.error ? rangeFields(`file-range-${i}`, f.rangeDraft) : ""}</div><button class="icon-button" data-remove="${i}" aria-label="Remove file" ${enqueuingFiles ? "disabled" : ""}>×</button></div>`,
     )
     .join("");
   $("#files")
@@ -603,22 +626,30 @@ function renderFiles() {
         }),
     );
   $("#file-actions").innerHTML = files.length
-    ? `<div class="import-actions"><span class="muted">${files.length} file${files.length === 1 ? "" : "s"} selected</span><button id="enqueue-files" class="primary" ${files.some((f) => f.pending || f.error) || !state.dependencies.file?.ready ? "disabled" : ""}>Add to queue</button></div>`
+    ? `<div class="import-actions"><span class="muted">${files.length} file${files.length === 1 ? "" : "s"} selected</span><button id="enqueue-files" class="primary" ${enqueuingFiles || files.some((f) => f.pending || f.error) || !state.dependencies.file?.ready ? "disabled" : ""}>${enqueuingFiles ? "Adding…" : "Add to queue"}</button></div>`
     : "";
+  files.forEach((f, i) => {
+    if (f.meta && !f.error) bindRange(`file-range-${i}`, f.rangeDraft, f.meta.duration);
+  });
   if ($("#enqueue-files"))
     $("#enqueue-files").onclick = async () => {
-      const b = $("#enqueue-files");
-      b.disabled = true;
+      if (enqueuingFiles || files.some((f) => f.pending || f.error)) return;
+      enqueuingFiles = true;
       try {
-        await rpc("enqueue", {
-          sources: files.map((f) => f.path),
-          kind: "file",
-        });
-        files = [];
-        navigate("queue");
+        // Validate every selection first. Remove only successfully queued files,
+        // so a later error cannot cause duplicate jobs on the next attempt.
+        const entries = files.map((file) => ({ file, range: readRange(file.rangeDraft, file.meta.duration) }));
+        renderFiles();
+        for (const { file, range } of entries) {
+          await rpc("enqueue", { sources: [file.path], kind: "file", range });
+          files = files.filter((f) => f !== file);
+        }
+        if (!files.length && view === "new") navigate("queue");
       } catch (e) {
         error(e);
-        b.disabled = false;
+      } finally {
+        enqueuingFiles = false;
+        if (view === "new") renderFiles();
       }
     };
 }
@@ -637,12 +668,22 @@ async function fetchURL() {
   fetchURL.pending = true;
   syncURLButton();
   try {
+    if (view === "new") $("#url-error").hidden = true;
     const result = await rpc("metadata", raw);
     if (version !== urlVersion) return;
     urlMeta = result;
     if (view === "new") renderURL();
   } catch (e) {
-    if (version === urlVersion) error(e);
+    if (version === urlVersion) {
+      if (view === "new") {
+        $("#url-error").textContent = e.message;
+        $("#url-error").hidden = false;
+        if (/sign.?in|login|cookies/i.test(e.message)) {
+          authOpen = true;
+          $("#url-sign-in").open = true;
+        }
+      } else error(e);
+    }
   } finally {
     fetchURL.pending = false;
     syncURLButton();
@@ -657,9 +698,13 @@ function syncURLButton() {
 function renderURL() {
   if (!urlMeta || !$("#url-details")) return;
   $("#url-details").innerHTML =
-    `<div class="metadata"><h3>${escape(urlMeta.title)}</h3><small>${duration(urlMeta.duration)}</small></div><div class="import-actions"><label><input id="retain-media" type="checkbox" ${retainMedia ? "checked" : ""}>Keep downloaded media for playback</label><button class="primary" id="enqueue-url" ${state.dependencies.url?.ready ? "" : "disabled"}>Add to queue</button></div>`;
+    `<div class="metadata"><h3>${escape(urlMeta.title)}</h3><small>${duration(urlMeta.duration)}</small>${rangeFields("url-range", urlRange)}</div><div class="import-actions"><label><input id="retain-media" type="checkbox" ${retainMedia ? "checked" : ""}>Keep downloaded media for playback</label><button class="primary" id="enqueue-url" ${state.dependencies.url?.ready && !enqueuingURL ? "" : "disabled"}>${enqueuingURL ? "Adding…" : "Add to queue"}</button></div>`;
+  bindRange("url-range", urlRange, urlMeta.duration);
   $("#retain-media").onchange = (e) => (retainMedia = e.target.checked);
   $("#enqueue-url").onclick = async () => {
+    if (enqueuingURL || !urlMeta) return;
+    const version = urlVersion;
+    enqueuingURL = true;
     const b = $("#enqueue-url");
     b.disabled = true;
     try {
@@ -667,15 +712,153 @@ function renderURL() {
         sources: [urlMeta.url],
         kind: "url",
         retain: $("#retain-media").checked,
+        range: readRange(urlRange, urlMeta.duration),
       });
-      urlMeta = null;
-      urlDraft = "";
-      urlVersion++;
-      retainMedia = false;
-      navigate("queue");
+      if (version === urlVersion) {
+        urlMeta = null;
+        urlDraft = "";
+        urlRange = { start: "", end: "" };
+        urlVersion++;
+        retainMedia = false;
+        if (view === "new") navigate("queue");
+      }
     } catch (e) {
       error(e);
+    } finally {
+      enqueuingURL = false;
       b.disabled = false;
+      if (view === "new") renderURL();
+    }
+  };
+}
+
+function parseTimestamp(raw) {
+  raw = raw.trim();
+  if (!raw) return 0;
+  if (!/^\d+(?::\d{1,2}){0,2}(?:\.\d{1,3})?$/.test(raw))
+    throw Error("Use seconds, MM:SS, or HH:MM:SS (optional milliseconds).");
+  const parts = raw.split(":").map(Number);
+  if (parts.slice(1).some((n) => n >= 60))
+    throw Error("Minutes and seconds after a colon must be below 60.");
+  const seconds = parts.reduce((total, n) => total * 60 + n, 0);
+  if (!Number.isFinite(seconds) || seconds > 9223372036) throw Error("Timestamp is too large.");
+  return seconds;
+}
+function readRange(draft, total = 0) {
+  const start = parseTimestamp(draft.start), end = parseTimestamp(draft.end);
+  if (draft.end.trim() && end <= start) throw Error("End time must be after start time.");
+  if (total > 0 && start >= total) throw Error("Start time must be before the end of the media.");
+  if (total > 0 && end > total) throw Error("End time must not exceed the media duration.");
+  return { start, end };
+}
+function rangeFields(id, draft) {
+  return `<fieldset class="time-range"><legend>Time range <span class="muted">(optional)</span></legend><div class="range-inputs"><label>Start<input id="${id}-start" type="text" placeholder="00:00" value="${escape(draft.start)}" aria-describedby="${id}-help ${id}-status" ${enqueuingFiles && id.startsWith("file-") ? "disabled" : ""}></label><label>End<input id="${id}-end" type="text" placeholder="End of media" value="${escape(draft.end)}" aria-describedby="${id}-help ${id}-status" ${enqueuingFiles && id.startsWith("file-") ? "disabled" : ""}></label></div><p id="${id}-help" class="range-help">Seconds, MM:SS, or HH:MM:SS. Blank fields use the full audio. Transcript timestamps match the original media.</p><p id="${id}-status" class="range-help" aria-live="polite"></p></fieldset>`;
+}
+function bindRange(id, draft, total) {
+  const update = () => {
+    const status = $(`#${id}-status`);
+    try {
+      const range = readRange(draft, total);
+      status.textContent = range.start || range.end ? `Selected: ${rangeLabel(range)}` : "Entire recording";
+      status.classList.remove("field-error");
+    } catch (e) {
+      status.textContent = e.message;
+      status.classList.add("field-error");
+    }
+  };
+  for (const side of ["start", "end"]) {
+    $(`#${id}-${side}`).oninput = (e) => { draft[side] = e.target.value; update(); };
+  }
+  update();
+}
+function rangeLabel(range) {
+  if (!range || (!range.start && !range.end)) return "";
+  const stamp = (value) => clock(value) + (value % 1 ? (value % 1).toFixed(3).slice(1) : "");
+  return `${stamp(range.start || 0)} – ${range.end ? stamp(range.end) : "end"}`;
+}
+function usesCookieFile(browser) { return browser === "dia" || browser === "other"; }
+function signInURL() { return urlDraft.trim() || "https://www.youtube.com/"; }
+function cookieModeHelp(browser) {
+  if (browser === "zen") return "Zen uses its own profile. Leave the field blank for automatic selection, or open about:support in Zen and paste the Profile Folder path.";
+  if (usesCookieFile(browser)) return "Sign in and export this site's cookies in Netscape cookies.txt format, then choose the file below. A URL alone does not share your signed-in session. Keep cookie files private: they grant account access.";
+  return "Use a profile name or path, such as Default or Profile 1. Switch to that profile in the browser before signing in. Leave blank for the most recently used profile.";
+}
+function syncCookieFields(auth) {
+  const fileMode = usesCookieFile(auth.browser);
+  $("#cookie-profile-field").hidden = fileMode;
+  $("#cookie-file-field").hidden = !fileMode;
+  $("#cookie-profile").disabled = fileMode || !auth.browser || auth.browser === "safari";
+  $("#cookie-mode-help").textContent = cookieModeHelp(auth.browser);
+  $("#open-sign-in").disabled = !auth.browser;
+}
+function signInHelper() {
+  const a = authDraft || state.settings.urlAuth || {};
+  const browsers = [["", "Off — public links"], ["zen", "Zen"], ["dia", "Dia (cookies.txt)"], ["chrome", "Chrome"], ["firefox", "Firefox"], ["safari", "Safari"], ["edge", "Edge"], ["brave", "Brave"], ["chromium", "Chromium"], ["opera", "Opera"], ["vivaldi", "Vivaldi"], ["whale", "Whale"], ["other", "Other browser (cookies.txt)"]];
+  return `<details id="url-sign-in" class="sign-in-helper" ${authOpen ? "open" : ""}>
+    <summary>URL sign-in helper${state.settings.urlAuth?.browser ? ` · ${escape(state.settings.urlAuth.browser)}` : ""}</summary>
+    <p>Choose the browser where you can play the media. Open the site or copy its URL into your browser, sign in, then save below and fetch details again.</p>
+    <div class="auth-fields">
+      <label class="field"><span>Signed-in browser</span><select id="cookie-browser">${browsers.map(([value, name]) => `<option value="${value}" ${a.browser === value || (!a.browser && !value) ? "selected" : ""}>${name}</option>`).join("")}</select></label>
+      <label class="field" id="cookie-profile-field" ${usesCookieFile(a.browser) ? "hidden" : ""}><span>Browser profile (optional)</span><input id="cookie-profile" value="${escape(a.profile || "")}" placeholder="Automatic, or profile path" ${!a.browser || a.browser === "safari" ? "disabled" : ""}></label>
+      <div class="field" id="cookie-file-field" ${usesCookieFile(a.browser) ? "" : "hidden"}><label for="cookie-file">Cookies.txt file</label><input id="cookie-file" value="${escape(a.cookiesFile || "")}" placeholder="Choose a local Netscape cookie export"><div class="controls"><button id="choose-cookies">Choose file…</button><button id="cookie-export-help">How to export cookies</button></div></div>
+    </div>
+    <p id="cookie-mode-help" class="range-help">${cookieModeHelp(a.browser)}</p>
+    <label class="field sign-in-url"><span>Sign-in URL — copy and paste into any browser</span><input id="sign-in-url" readonly value="${escape(signInURL())}"></label>
+    <div class="controls"><button id="open-sign-in" ${!a.browser ? "disabled" : ""}>Open site to sign in</button><button id="copy-sign-in-url">Copy URL</button><button id="save-url-auth" ${savingAuth ? "disabled" : ""}>${savingAuth ? "Saving…" : "Save sign-in settings"}</button></div>
+    <p class="range-help">Tala saves only the browser/profile selection or cookie-file path. Browser cookies are read locally. Imported cookie files are used through a private temporary copy and the original is preserved.</p>
+    <p class="range-help">If cookies cannot be read, close the browser and retry, or use a fresh cookies.txt export. macOS may request Keychain or file access. Access still depends on the site and installed yt-dlp.</p>
+  </details>`;
+}
+function bindSignInHelper() {
+  $("#url-sign-in").ontoggle = (e) => { authOpen = e.target.open; };
+  const capture = () => {
+    const browser = $("#cookie-browser").value;
+    authDraft = { browser, profile: $("#cookie-profile").value.trim() };
+    if (!browser || browser === "safari" || usesCookieFile(browser)) {
+      authDraft.profile = "";
+      $("#cookie-profile").value = "";
+    }
+    if (usesCookieFile(browser)) authDraft.cookiesFile = $("#cookie-file").value.trim();
+    else $("#cookie-file").value = "";
+    syncCookieFields(authDraft);
+    return { ...authDraft };
+  };
+  $("#cookie-browser").onchange = capture;
+  $("#cookie-profile").oninput = capture;
+  $("#cookie-file").oninput = capture;
+  $("#choose-cookies").onclick = () => { capture(); action("pickCookies"); };
+  $("#cookie-export-help").onclick = () => action("openSignIn", { browser: "other", url: "https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp" });
+  $("#copy-sign-in-url").onclick = () => action("copySignInURL", signInURL());
+  $("#open-sign-in").onclick = () => {
+    const a = capture();
+    action("openSignIn", { url: signInURL(), browser: a.browser });
+  };
+  $("#save-url-auth").onclick = async () => {
+    if (savingAuth) return;
+    const auth = capture();
+    if (usesCookieFile(auth.browser) && !auth.cookiesFile) {
+      error("Choose a Netscape cookies.txt export from your signed-in browser first.");
+      $("#cookie-file").focus();
+      return;
+    }
+    savingAuth = true;
+    $("#save-url-auth").disabled = true;
+    try {
+      await rpc("urlAuth", auth);
+      state.settings.urlAuth = auth;
+      if ($("#url-sign-in summary")) $("#url-sign-in summary").textContent = `URL sign-in helper${auth.browser ? " · " + auth.browser : ""}`;
+      urlVersion++;
+      urlMeta = null;
+      if (view === "new") $("#url-details").innerHTML = "";
+      toast(auth.browser ? "Sign-in settings saved. Fetch details again to check access." : "Browser sign-in disabled.");
+    } catch (e) {
+      error(e);
+    } finally {
+      savingAuth = false;
+      if ($("#save-url-auth")) {
+        $("#save-url-auth").disabled = false;
+        $("#save-url-auth").textContent = "Save sign-in settings";
+      }
     }
   };
 }
@@ -686,7 +869,7 @@ function renderQueue() {
       <div class="collection-toolbar"><span class="collection-count">${active ? `${active} in progress or waiting` : `${state.jobs.length} finished import${state.jobs.length === 1 ? "" : "s"}`}</span><button id="clear-queue" ${!state.jobs.length || clearingQueue ? "disabled" : ""}>${clearingQueue ? "Clearing…" : "Clear queue"}</button></div>
       <div class="queue-list">${state.jobs.length ? state.jobs.map((j) => `
         <article class="job">
-          <div class="job-head"><span class="job-symbol">${icon(j.kind === "url" ? "link" : "file")}</span><div class="job-title"><h2>${escape(j.title)}</h2><span class="job-status" data-state="${escape(j.state)}">${escape(jobStates[j.state] || j.state)}</span><small>${duration(j.duration)}</small></div>
+          <div class="job-head"><span class="job-symbol">${icon(j.kind === "url" ? "link" : "file")}</span><div class="job-title"><h2>${escape(j.title)}</h2><span class="job-status" data-state="${escape(j.state)}">${escape(jobStates[j.state] || j.state)}</span><small>${duration(j.duration)}${rangeLabel(j.range) ? ` · ${rangeLabel(j.range)}` : ""}</small></div>
             <div class="controls">${j.sessionId ? `<button data-open="${j.sessionId}">Open transcript</button>` : ""}${!terminal.has(j.state) ? `<button data-cancel="${j.id}">Cancel</button>` : j.state !== "completed" ? `<button data-retry="${j.id}">Retry</button>` : ""}</div>
           </div>
           ${j.state === "transcribing" || j.state === "paused" || j.state === "completed" ? `<div class="job-progress"><progress max="1" value="${j.progress || 0}" aria-label="Transcription progress"></progress><span>${Math.floor((j.progress || 0) * 100)}%</span></div><small class="job-timing">${clock(j.processed)} processed · ${clock(j.elapsed)} elapsed</small>` : ""}
@@ -836,7 +1019,7 @@ function renderSession() {
   page(
     `<div id="recording-banner"></div>
     <div class="session-heading"><h1 id="session-title">${escape(s.title)}</h1><button id="rename-session" class="icon-button" aria-label="Rename session" title="Rename session">${icon("edit")}</button></div>
-    <div class="session-meta" id="session-meta">${escape(label(s.type))} · ${date(s.created)} · ${duration(s.duration)}<br>${escape(s.source)}</div>
+    <div class="session-meta" id="session-meta">${escape(label(s.type))} · ${date(s.created)} · ${duration(s.duration)}<br>${escape(s.source)}${rangeLabel(s.range) ? `<br>Selected range: ${rangeLabel(s.range)}` : ""}</div>
     <div class="session-actions">${s.mediaPath ? '<button id="review-media">Play media</button>' : ""}<button id="open-source">${sourceLabel}</button><button id="delete-session" class="danger">Delete session</button></div>
     <div class="viewer-toolbar" role="toolbar" aria-label="Transcript display">
       <select id="display-mode" aria-label="Transcript display"><option value="clean">Text only · paragraphs</option><option value="continuous">Text only · single line</option><option value="timestamps">Timestamps</option><option value="sources">Sources + timestamps</option></select>
@@ -1027,6 +1210,7 @@ function renameSession() {
 }
 function readSettings() {
   return {
+    ...state.settings,
     modelPath: $("#model-path").value.trim(),
     modelDir: $("#model-dir").value.trim(),
     language: $("#language").value,
@@ -1058,9 +1242,10 @@ function renderSettings() {
   const m = state.model,
     s = state.settings;
   page(
-    `<h1 class="visually-hidden">Settings</h1>${appearanceSettings()}<div class="settings-group"><h2>Whisper Large v3 Turbo</h2><div class="model-status"><strong>${escape({ reused: "Existing model verified", downloaded: "Model downloaded", checking: "Checking existing models…", missing: "Model required" }[m.state] || m.state)}</strong><code>${escape(m.path || m.detail || "Choose an existing model below.")}</code></div><p>Model format and SHA-256 checksum must match Whisper Large v3 Turbo.</p><label class="field"><span>Existing model path</span><input id="model-path" value="${escape(s.modelPath || m.path || "")}" placeholder="/path/to/ggml-large-v3-turbo.bin"></label><label class="field"><span>Additional model directory</span><input id="model-dir" value="${escape(s.modelDir || "")}" placeholder="Optional directory to search"></label><div class="controls"><button id="choose-model">Choose model…</button><button id="verify-model">Save and verify model</button>${m.path ? "" : '<button id="download-model">Download model (1.6 GB)</button>'}</div></div><div class="settings-group"><h2>Recognition</h2><label class="field"><span>Language</span><select id="language"><option value="auto">Automatic (English, Filipino, Taglish, other languages)</option><option value="en">English</option><option value="tl">Filipino / Tagalog</option></select></label><label class="field"><span>Vocabulary hints (optional)</span><textarea id="context-prompt" aria-describedby="vocabulary-help" placeholder="e.g. Tala, Ateneo de Manila, Kubernetes, barangay"></textarea></label><p id="vocabulary-help">Help Whisper recognize unusual names, acronyms, and technical terms by listing words you expect to hear, or adding a short description of the recording. For example: “A Taglish lecture about Kubernetes at Ateneo de Manila.” This is a recognition hint, not a replacement list or an instruction to rewrite text. It may improve spelling but does not guarantee it. Leave blank for general recordings. Applies to new audio in live, file, and URL transcriptions.</p><p>Use Automatic for mixed languages. Translation is disabled.</p><button id="save-settings" class="primary">Save settings</button></div><div class="settings-group"><h2>Application</h2><label><input id="menu-bar-icon" type="checkbox" ${s.menuBarIcon ? "checked" : ""}> Show Tala in the menu bar</label><p>Off by default. Enable quick recording controls in the menu bar. You can always reopen Tala from the Dock.</p></div><div class="settings-group"><h2>Media tools</h2><p>FFmpeg decodes local files. yt-dlp imports supported URLs. Required for media imports.</p><div id="dependency-checks" aria-live="polite"></div></div><div class="settings-group"><h2>Storage</h2><p>${escape(state.output || "~/Documents/Kian/")}<br>Temporary audio is deleted after processing.</p><button id="open-storage">Open transcript folder</button></div>`,
+    `<h1 class="visually-hidden">Settings</h1>${appearanceSettings()}<div class="settings-group"><h2>Whisper Large v3 Turbo</h2><div class="model-status"><strong>${escape({ reused: "Existing model verified", downloaded: "Model downloaded", checking: "Checking existing models…", missing: "Model required" }[m.state] || m.state)}</strong><code>${escape(m.path || m.detail || "Choose an existing model below.")}</code></div><p>Model format and SHA-256 checksum must match Whisper Large v3 Turbo.</p><label class="field"><span>Existing model path</span><input id="model-path" value="${escape(s.modelPath || m.path || "")}" placeholder="/path/to/ggml-large-v3-turbo.bin"></label><label class="field"><span>Additional model directory</span><input id="model-dir" value="${escape(s.modelDir || "")}" placeholder="Optional directory to search"></label><div class="controls"><button id="choose-model">Choose model…</button><button id="verify-model">Save and verify model</button>${m.path ? "" : '<button id="download-model">Download model (1.6 GB)</button>'}</div></div><div class="settings-group"><h2>Recognition</h2><label class="field"><span>Language</span><select id="language"><option value="auto">Automatic (English, Filipino, Taglish, other languages)</option><option value="en">English</option><option value="tl">Filipino / Tagalog</option></select></label><label class="field"><span>Vocabulary hints (optional)</span><textarea id="context-prompt" aria-describedby="vocabulary-help" placeholder="e.g. Tala, Ateneo de Manila, Kubernetes, barangay"></textarea></label><p id="vocabulary-help">Help Whisper recognize unusual names, acronyms, and technical terms by listing words you expect to hear, or adding a short description of the recording. For example: “A Taglish lecture about Kubernetes at Ateneo de Manila.” This is a recognition hint, not a replacement list or an instruction to rewrite text. It may improve spelling but does not guarantee it. Leave blank for general recordings. Applies to new audio in live, file, and URL transcriptions.</p><p>Use Automatic for mixed languages. Translation is disabled.</p><button id="save-settings" class="primary">Save settings</button></div><div class="settings-group"><h2>Application</h2><label><input id="menu-bar-icon" type="checkbox" ${s.menuBarIcon ? "checked" : ""}> Show Tala in the menu bar</label><p>Off by default. Enable quick recording controls in the menu bar. You can always reopen Tala from the Dock.</p></div><div class="settings-group"><h2>Media tools</h2><p>FFmpeg decodes local files. yt-dlp imports supported URLs. Required for media imports.</p><div id="dependency-checks" aria-live="polite"></div>${signInHelper()}</div><div class="settings-group"><h2>Storage</h2><p>${escape(state.output || "~/Documents/Kian/")}<br>Temporary audio is deleted after processing.</p><button id="open-storage">Open transcript folder</button></div>`,
   );
   bindAppearanceSettings();
+  bindSignInHelper();
   renderDependencyChecks();
   refreshDependencies();
   $("#language").value = s.language || "auto";
