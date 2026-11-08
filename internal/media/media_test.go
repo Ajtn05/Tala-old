@@ -1,8 +1,11 @@
 package media
 
 import (
+	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
+	"io"
 	"math"
 	"os"
 	"os/exec"
@@ -12,6 +15,104 @@ import (
 	"testing"
 	"time"
 )
+
+type observedPCMReader struct {
+	io.Reader
+	reads chan int
+}
+
+func (r observedPCMReader) Read(p []byte) (int, error) {
+	n, err := r.Reader.Read(p)
+	if n > 0 {
+		r.reads <- n
+	}
+	return n, err
+}
+
+func TestPrefetchPreservesEverySampleAndWindowBoundary(t *testing.T) {
+	// Include arbitrary float bit patterns, rather than only a periodic tone.
+	// Retain each window until decoding ends to detect accidental buffer reuse.
+	const window = 30 * 16000
+	raw := make([]byte, (2*window+13)*4)
+	for i := 0; i < len(raw)/4; i++ {
+		binary.LittleEndian.PutUint32(raw[i*4:], uint32(i)*2654435761)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	reads := make(chan int, 3)
+	chunks := make(chan pcmChunk)
+	done := make(chan error, 1)
+	go func() {
+		done <- decodePCM(ctx, observedPCMReader{bytes.NewReader(raw), reads}, chunks)
+		close(chunks)
+	}()
+	var got []pcmChunk
+	select {
+	case first := <-chunks:
+		got = append(got, first)
+	case <-ctx.Done():
+		t.Fatal("first window was not delivered")
+	}
+	// The second window must be read before the first consumer is finished.
+	for i := 0; i < 2; i++ {
+		select {
+		case <-reads:
+		case <-ctx.Done():
+			t.Fatal("decoder did not read ahead during consumption")
+		}
+	}
+	select {
+	case <-reads:
+		t.Fatal("decoder read more than one window ahead")
+	default:
+	}
+	for chunk := range chunks {
+		got = append(got, chunk)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 3 || got[0].offset != 0 || got[1].offset != 30 || got[2].offset != 60 || len(got[2].samples) != 13 {
+		t.Fatalf("window boundaries changed; received %d windows", len(got))
+	}
+	index := 0
+	for _, chunk := range got {
+		for _, sample := range chunk.samples {
+			want := binary.LittleEndian.Uint32(raw[index*4:])
+			if math.Float32bits(sample) != want {
+				t.Fatalf("sample %d changed: got %08x, want %08x", index, math.Float32bits(sample), want)
+			}
+			index++
+		}
+	}
+}
+
+func TestPrefetchCancellationWhileWaitingForConsumer(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	reads := make(chan int, 1)
+	chunks := make(chan pcmChunk)
+	done := make(chan error, 1)
+	go func() {
+		done <- decodePCM(ctx, observedPCMReader{bytes.NewReader(make([]byte, 30*16000*4)), reads}, chunks)
+	}()
+	<-reads
+	cancel() // No consumer receives the prefetched window.
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("unexpected cancellation error: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("prefetch goroutine leaked while waiting for consumer")
+	}
+}
+
+func TestPrefetchRejectsTruncatedPCM(t *testing.T) {
+	if err := decodePCM(context.Background(), bytes.NewReader([]byte{0, 1, 2}), make(chan pcmChunk)); err == nil {
+		t.Fatal("accepted a truncated float sample")
+	}
+}
 
 func TestURLValidation(t *testing.T) {
 	for _, s := range []string{"file:///etc/passwd", "ftp://example.com/a", "https://user:password@example.com/a", "javascript:alert(1)", "--exec=bad", "https://"} {
@@ -69,6 +170,41 @@ func TestStreamCancellationStopsDecoder(t *testing.T) {
 	e := Stream(ctx, p, func(_ []float32, _ float64) error { cancel(); return ctx.Err() })
 	if !errors.Is(e, context.Canceled) {
 		t.Fatalf("did not cancel: %v", e)
+	}
+}
+
+func TestStreamConsumerErrorStopsPrefetch(t *testing.T) {
+	p := synthetic(t, 63)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	want := errors.New("stop consuming")
+	calls := 0
+	err := Stream(ctx, p, func(_ []float32, _ float64) error {
+		calls++
+		return want
+	})
+	if !errors.Is(err, want) || calls != 1 {
+		t.Fatalf("consumer error lost or subsequent window consumed: %v, calls=%d", err, calls)
+	}
+}
+
+func TestStreamPreservesDecoderFailureAfterPartialAudio(t *testing.T) {
+	dir := t.TempDir()
+	script := "#!/bin/sh\nprintf '\\000\\000\\200\\077'\nprintf 'fixture decode failed' >&2\nexit 7\n"
+	if err := os.WriteFile(filepath.Join(dir, "ffmpeg"), []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir)
+	calls := 0
+	err := Stream(context.Background(), "/unused.wav", func(samples []float32, offset float64) error {
+		calls++
+		if len(samples) != 1 || samples[0] != 1 || offset != 0 {
+			t.Fatalf("partial audio changed: %v at %v", samples, offset)
+		}
+		return nil
+	})
+	if err == nil || !strings.Contains(err.Error(), "fixture decode failed") || calls != 1 {
+		t.Fatalf("decoder failure lost: %v, calls=%d", err, calls)
 	}
 }
 func TestProbeRejectsNonAudioAndDirectories(t *testing.T) {

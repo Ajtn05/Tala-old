@@ -60,7 +60,28 @@ func (t *Transcriber) Transcribe(ctx context.Context, samples []float32) ([]Segm
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	// Only exact digital silence is safe to omit without a speech detector.
+	// A nonzero sample, however quiet, must still reach the unchanged decoder.
+	if digitalSilence(samples) {
+		return nil, nil
+	}
+	return t.transcribe(ctx, samples)
+}
 
+func digitalSilence(samples []float32) bool {
+	if len(samples) == 0 {
+		return false
+	}
+	for _, sample := range samples {
+		if sample != 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// transcribe is the unchanged native path, also used as the benchmark reference.
+func (t *Transcriber) transcribe(ctx context.Context, samples []float32) ([]Segment, error) {
 	wctx, err := t.model.NewContext()
 	if err != nil {
 		return nil, fmt.Errorf("create context: %w", err)

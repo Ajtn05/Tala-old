@@ -164,13 +164,17 @@ func Download(ctx context.Context, raw, dir string) (string, error) {
 	return "", errors.New("download completed without an audio file")
 }
 
-// Stream keeps at most one 30-second PCM chunk in memory. Consecutive windows do not overlap.
+// Stream decodes one window ahead while consume processes the current window.
+// It retains at most two 30-second PCM chunks and one raw decoding buffer.
+// Consecutive windows do not overlap, and consume is always called sequentially.
 func Stream(ctx context.Context, path string, consume func([]float32, float64) error) error {
+	decodeCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	abs, e := filepath.Abs(path)
 	if e != nil {
 		return e
 	}
-	cmd, e := command(ctx, "ffmpeg", "-nostdin", "-v", "error", "-i", abs, "-map", "0:a:0", "-vn", "-ac", "1", "-ar", "16000", "-f", "f32le", "pipe:1")
+	cmd, e := command(decodeCtx, "ffmpeg", "-nostdin", "-v", "error", "-i", abs, "-map", "0:a:0", "-vn", "-ac", "1", "-ar", "16000", "-f", "f32le", "pipe:1")
 	if e != nil {
 		return e
 	}
@@ -184,35 +188,40 @@ func Stream(ctx context.Context, path string, consume func([]float32, float64) e
 		return e
 	}
 	ok := false
+	chunks := make(chan pcmChunk)
+	decoded := make(chan struct{})
+	var decodeErr error
+	go func() {
+		defer close(decoded)
+		defer close(chunks)
+		decodeErr = decodePCM(decodeCtx, pipe, chunks)
+	}()
 	defer func() {
+		cancel()
 		if !ok {
 			_ = cmd.Cancel()
+		}
+		<-decoded
+		if !ok {
 			_ = cmd.Wait()
 		}
 	}()
-	raw := make([]byte, 30*16000*4)
 	offset := 0.0
-	for {
-		n, readErr := io.ReadFull(pipe, raw)
-		if n > 0 {
-			if n%4 != 0 {
-				return errors.New("truncated PCM sample")
-			}
-			samples := make([]float32, n/4)
-			for i := range samples {
-				samples[i] = math.Float32frombits(binary.LittleEndian.Uint32(raw[i*4:]))
-			}
-			if e = consume(samples, offset); e != nil {
-				return e
-			}
-			offset += float64(len(samples)) / 16000
+	for chunk := range chunks {
+		if e = ctx.Err(); e != nil {
+			return e
 		}
-		if readErr == io.EOF || readErr == io.ErrUnexpectedEOF {
-			break
+		if e = consume(chunk.samples, chunk.offset); e != nil {
+			return e
 		}
-		if readErr != nil {
-			return readErr
-		}
+		offset = chunk.offset + float64(len(chunk.samples))/16000
+	}
+	<-decoded
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	if decodeErr != nil {
+		return decodeErr
 	}
 	e = cmd.Wait()
 	ok = true
@@ -224,6 +233,44 @@ func Stream(ctx context.Context, path string, consume func([]float32, float64) e
 	}
 	if offset == 0 {
 		return errors.New("no audio samples were decoded")
+	}
+	return nil
+}
+
+type pcmChunk struct {
+	samples []float32
+	offset  float64
+}
+
+func decodePCM(ctx context.Context, pipe io.Reader, chunks chan<- pcmChunk) error {
+	raw := make([]byte, 30*16000*4)
+	offset := 0.0
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		n, readErr := io.ReadFull(pipe, raw)
+		if n > 0 {
+			if n%4 != 0 {
+				return errors.New("truncated PCM sample")
+			}
+			samples := make([]float32, n/4)
+			for i := range samples {
+				samples[i] = math.Float32frombits(binary.LittleEndian.Uint32(raw[i*4:]))
+			}
+			select {
+			case chunks <- pcmChunk{samples, offset}:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+			offset += float64(len(samples)) / 16000
+		}
+		if readErr == io.EOF || readErr == io.ErrUnexpectedEOF {
+			break
+		}
+		if readErr != nil {
+			return readErr
+		}
 	}
 	return nil
 }
