@@ -29,20 +29,36 @@ type Event struct {
 	Data any    `json:"data"`
 }
 type Job struct {
-	ID        string          `json:"id"`
-	Title     string          `json:"title"`
-	Source    string          `json:"source"`
-	Kind      string          `json:"kind"`
-	State     string          `json:"state"`
-	Progress  float64         `json:"progress"`
-	Duration  float64         `json:"duration"`
-	Processed float64         `json:"processed"`
-	Elapsed   float64         `json:"elapsed"`
-	Error     string          `json:"error,omitempty"`
-	SessionID string          `json:"sessionId,omitempty"`
-	Retain    bool            `json:"retain"`
-	Range     media.TimeRange `json:"range,omitempty"`
+	ID          string                 `json:"id"`
+	Title       string                 `json:"title"`
+	CustomTitle string                 `json:"customTitle,omitempty"`
+	Source      string                 `json:"source"`
+	Kind        string                 `json:"kind"`
+	State       string                 `json:"state"`
+	Progress    float64                `json:"progress"`
+	Duration    float64                `json:"duration"`
+	Processed   float64                `json:"processed"`
+	Elapsed     float64                `json:"elapsed"`
+	Error       string                 `json:"error,omitempty"`
+	SessionID   string                 `json:"sessionId,omitempty"`
+	Retain      bool                   `json:"retain"`
+	Range       media.TimeRange        `json:"range,omitempty"`
+	Download    media.DownloadProgress `json:"download,omitempty"`
 }
+
+type ImportOptions struct {
+	Retain bool
+	Range  media.TimeRange
+	Title  string
+}
+
+func (j Job) importTitle(sourceTitle string) string {
+	if j.CustomTitle != "" {
+		return j.CustomTitle
+	}
+	return sourceTitle
+}
+
 type Live struct {
 	Active    bool       `json:"active"`
 	State     string     `json:"state"`
@@ -111,6 +127,7 @@ func newControllerWithOptions(output string, manager models.Manager, recognition
 		if c.jobs[i].State != "completed" && c.jobs[i].State != "failed" && c.jobs[i].State != "cancelled" {
 			c.jobs[i].State = "waiting"
 			c.jobs[i].Progress = 0
+			c.jobs[i].Download = media.DownloadProgress{}
 		}
 	}
 	if items, e := c.Store.List(); e == nil {
@@ -342,6 +359,14 @@ func (c *Controller) Enqueue(source, kind string, retain bool) (Job, error) {
 	return c.EnqueueRange(source, kind, retain, media.TimeRange{})
 }
 func (c *Controller) EnqueueRange(source, kind string, retain bool, selection media.TimeRange) (Job, error) {
+	return c.EnqueueWithOptions(source, kind, ImportOptions{Retain: retain, Range: selection})
+}
+func (c *Controller) EnqueueWithOptions(source, kind string, options ImportOptions) (Job, error) {
+	selection := options.Range
+	title := strings.TrimSpace(options.Title)
+	if len([]rune(title)) > 200 || strings.ContainsAny(title, "\x00\r\n") {
+		return Job{}, errors.New("use a transcript title of at most 200 characters on one line")
+	}
 	if err := selection.Validate(0); err != nil {
 		return Job{}, err
 	}
@@ -378,7 +403,8 @@ func (c *Controller) EnqueueRange(source, kind string, retain bool, selection me
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	job := Job{ID: session.ID(), Title: filepath.Base(source), Source: source, Kind: kind, State: "waiting", Retain: retain, Range: selection}
+	job := Job{ID: session.ID(), Title: filepath.Base(source), CustomTitle: title, Source: source, Kind: kind, State: "waiting", Retain: options.Retain, Range: selection}
+	job.Title = job.importTitle(job.Title)
 	c.jobs = append(c.jobs, job)
 	if e := c.saveJobsLocked(); e != nil {
 		c.jobs = c.jobs[:len(c.jobs)-1]
@@ -434,6 +460,21 @@ func (c *Controller) changeJob(id string, fn func(*Job)) {
 	}
 	c.emitLocked("jobs", append([]Job{}, c.jobs...))
 }
+
+// Transfer ticks are transient. State transitions persist the latest statistics;
+// avoiding a disk sync on each tick keeps progress delivery light during downloads.
+func (c *Controller) updateDownload(id string, progress media.DownloadProgress, elapsed float64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for i := range c.jobs {
+		if c.jobs[i].ID == id {
+			c.jobs[i].Download = progress
+			c.jobs[i].Elapsed = elapsed
+			c.emitLocked("jobs", append([]Job{}, c.jobs...))
+			return
+		}
+	}
+}
 func (c *Controller) CancelJob(id string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -473,6 +514,7 @@ func (c *Controller) Retry(id string) error {
 			j.Progress = 0
 			j.Processed = 0
 			j.Elapsed = 0
+			j.Download = media.DownloadProgress{}
 			if e := c.saveJobsLocked(); e != nil {
 				return e
 			}
@@ -567,7 +609,7 @@ func (c *Controller) process(ctx context.Context, job Job) error {
 	var err error
 	if job.Kind == "url" {
 		auth := c.URLAuth()
-		c.changeJob(job.ID, func(j *Job) { j.State = "downloading" })
+		c.changeJob(job.ID, func(j *Job) { j.State = "preparing"; j.Download = media.DownloadProgress{} })
 		meta, err = media.FetchWithAuth(ctx, job.Source, auth)
 		if err != nil {
 			return err
@@ -575,13 +617,20 @@ func (c *Controller) process(ctx context.Context, job Job) error {
 		if err := job.Range.Validate(meta.Duration); err != nil {
 			return err
 		}
-		c.changeJob(job.ID, func(j *Job) { j.Title = meta.Title; j.Duration = job.Range.Duration(meta.Duration) })
+		meta.Title = job.importTitle(meta.Title)
+		c.changeJob(job.ID, func(j *Job) {
+			j.Title = meta.Title
+			j.Duration = job.Range.Duration(meta.Duration)
+			j.State = "downloading"
+		})
 		tmp, e := os.MkdirTemp("", "tala-media-*")
 		if e != nil {
 			return e
 		}
 		defer os.RemoveAll(tmp)
-		path, err = media.DownloadWithAuth(ctx, job.Source, tmp, auth)
+		path, err = media.DownloadWithProgress(ctx, job.Source, tmp, auth, func(p media.DownloadProgress) {
+			c.updateDownload(job.ID, p, time.Since(started).Seconds())
+		})
 		if err != nil {
 			return err
 		}
@@ -594,6 +643,7 @@ func (c *Controller) process(ctx context.Context, job Job) error {
 	if meta.Title == "" {
 		meta = probed
 	}
+	meta.Title = job.importTitle(meta.Title)
 	if meta.Duration <= 0 {
 		meta.Duration = probed.Duration
 	}

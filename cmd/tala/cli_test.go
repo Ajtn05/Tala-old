@@ -35,6 +35,7 @@ func TestCLIOptions(t *testing.T) {
 		{"--cookies-from-browser", "dia", "https://example.org/media"},
 		{"--cookies", "https://example.org/cookies", "https://example.org/media"},
 		{"--cookies-from-browser", "chrome", "--cookies", "/cookies.txt", "https://example.org/media"},
+		{"--progress", "invalid", "one.wav"},
 	} {
 		if _, err := parseOptions(args, io.Discard); err == nil {
 			t.Errorf("accepted %v", args)
@@ -43,6 +44,12 @@ func TestCLIOptions(t *testing.T) {
 	o, err := parseOptions([]string{"--single-line", "--prompt=", "--transcribe", "first.wav", "--transcribe", "https://example.org/audio", "third.wav"}, io.Discard)
 	if err != nil || len(o.input) != 3 || o.textMode != "continuous" || !o.promptSet {
 		t.Fatalf("options: %+v %v", o, err)
+	}
+	for _, mode := range []string{"auto", "always", "never"} {
+		o, err := parseOptions([]string{"--progress", mode, "one.wav"}, io.Discard)
+		if err != nil || o.progress != mode {
+			t.Fatalf("progress mode %q: %+v %v", mode, o, err)
+		}
 	}
 }
 
@@ -119,7 +126,7 @@ func TestCLIWaitHandlesTerminalSnapshotAndMissingModel(t *testing.T) {
 	defer c.Close()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if err := waitModel(ctx, c); err == nil {
+	if err := waitModel(ctx, c, nil); err == nil {
 		t.Fatal("cancelled verification succeeded")
 	}
 	var out bytes.Buffer

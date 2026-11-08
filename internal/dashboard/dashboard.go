@@ -248,12 +248,13 @@ func (h *Host) dispatch(r request) (any, error) {
 			Kind    string
 			Retain  bool
 			Range   media.TimeRange
+			Title   string
 		}
 		if e := decode(r.Data, &d); e != nil {
 			return nil, e
 		}
 		for _, p := range d.Sources {
-			if _, e := c.EnqueueRange(p, d.Kind, d.Retain, d.Range); e != nil {
+			if _, e := c.EnqueueWithOptions(p, d.Kind, app.ImportOptions{Retain: d.Retain, Range: d.Range, Title: d.Title}); e != nil {
 				return nil, e
 			}
 		}

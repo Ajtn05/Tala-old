@@ -151,10 +151,14 @@ func Download(ctx context.Context, raw, dir string) (string, error) {
 	return DownloadWithAuth(ctx, raw, dir, URLAuth{})
 }
 func DownloadWithAuth(ctx context.Context, raw, dir string, auth URLAuth) (string, error) {
+	return DownloadWithProgress(ctx, raw, dir, auth, nil)
+}
+func DownloadWithProgress(ctx context.Context, raw, dir string, auth URLAuth, progress func(DownloadProgress)) (string, error) {
 	if e := ValidateURL(raw); e != nil {
 		return "", e
 	}
-	_, e := ytDLPOutput(ctx, auth, "--no-playlist", "--no-progress", "--no-warnings", "-f", "bestaudio/best", "-o", filepath.Join(dir, "source.%(ext)s"), "--", raw)
+	args := []string{"--no-playlist", "--newline", "--progress", "--progress-delta", "0.5", "--progress-template", downloadTemplate, "--no-warnings", "-f", "bestaudio/best", "-o", filepath.Join(dir, "source.%(ext)s"), "--", raw}
+	_, e := ytDLPExecute(ctx, auth, args, func(args []string) ([]byte, error) { return streamDownload(ctx, args, progress) })
 	if e != nil {
 		return "", e
 	}

@@ -30,6 +30,23 @@ body {
   background: var(--bg);
   color: var(--ink);
   overflow: hidden;
+  -webkit-user-select: none;
+  user-select: none;
+}
+/* Keep editable values and transcript content, titles, and metadata selectable. */
+input,
+textarea,
+.segment-text,
+.segment-meta,
+.timestamp,
+#session-title,
+.session-meta,
+.session-row .row-main,
+.session-row .date,
+.queue-item strong,
+.job-title h2 {
+  -webkit-user-select: text;
+  user-select: text;
 }
 button,
 input,
@@ -39,6 +56,8 @@ textarea {
   color: inherit;
 }
 button {
+  -webkit-user-select: none;
+  user-select: none;
   cursor: pointer;
   border: 1px solid var(--line);
   border-radius: 7px;

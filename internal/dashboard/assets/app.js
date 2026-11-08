@@ -56,6 +56,7 @@ let view = "new",
   pending = new Map(),
   files = [],
   urlMeta = null,
+  urlTitle = null,
   urlDraft = "",
   urlVersion = 0,
   urlRange = { start: "", end: "" },
@@ -421,6 +422,7 @@ function renderNew() {
     urlVersion++;
     urlMeta = null;
     urlRange = { start: "", end: "" };
+    urlTitle = null;
     retainMedia = false;
     $("#url-details").innerHTML = "";
     $("#url-error").hidden = true;
@@ -482,6 +484,21 @@ function renderHomeRecording() {
   };
   if ($("#open-model")) $("#open-model").onclick = () => navigate("settings");
 }
+function formatBytes(bytes) {
+  let n = Math.max(0, Number(bytes) || 0), i = 0;
+  const units = ["B", "KiB", "MiB", "GiB", "TiB"];
+  while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
+  return `${i ? n.toFixed(1) : Math.floor(n)} ${units[i]}`;
+}
+function downloadProgressHTML(job) {
+  const p = job.download || {}, known = p.total > 0;
+  const fraction = known ? (p.status === "finished" ? 1 : Math.max(0, Math.min(.999, (p.downloaded || 0) / p.total))) : 0;
+  const percent = known ? `${p.estimated ? "~" : ""}${Math.floor(fraction * 100)}%` : "Downloading…";
+  const detail = [formatBytes(p.downloaded || 0) + (known ? ` / ${p.estimated ? "~" : ""}${formatBytes(p.total)}` : " downloaded")];
+  if (p.speed > 0) detail.push(`${formatBytes(p.speed)}/s`);
+  if (p.eta > 0) detail.push(`ETA ${clock(p.eta)}`);
+  return `<span class="job-progress download-progress"><progress max="1" ${known ? `value="${fraction}"` : ""} aria-label="Download progress"></progress><span>${percent}</span></span><small class="job-timing">${detail.join(" · ")}</small>`;
+}
 function renderHomeQueue() {
   if (view !== "new") return;
   const container = $("#home-queue"), scrollTop = container.scrollTop || 0;
@@ -491,6 +508,7 @@ function renderHomeQueue() {
     ? recent.map((j) => `<button class="queue-item" data-queue-job="${escape(j.id)}">
         <strong>${escape(j.title)}</strong>
         <span class="queue-item-meta"><span class="${j.state === "failed" ? "job-error" : ""}">${escape(jobStates[j.state] || j.state)}</span>${j.state === "transcribing" || j.state === "paused" || j.state === "completed" ? `<span>${Math.floor((j.progress || 0) * 100)}%</span>` : ""}</span>
+        ${j.state === "downloading" ? downloadProgressHTML(j) : ""}
         ${j.state === "transcribing" || j.state === "paused" ? `<progress max="1" value="${j.progress || 0}" aria-label="${escape(j.title)} transcription progress"></progress>` : ""}
       </button>`).join("")
     : `<div class="queue-empty"><span class="queue-empty-icon">${icon("check")}</span><strong>Your queue is clear</strong><p>Files and links appear here while they’re transcribed.</p></div>`;
@@ -672,6 +690,7 @@ async function fetchURL() {
     const result = await rpc("metadata", raw);
     if (version !== urlVersion) return;
     urlMeta = result;
+    if (urlTitle === null) urlTitle = result.title || "";
     if (view === "new") renderURL();
   } catch (e) {
     if (version === urlVersion) {
@@ -698,8 +717,9 @@ function syncURLButton() {
 function renderURL() {
   if (!urlMeta || !$("#url-details")) return;
   $("#url-details").innerHTML =
-    `<div class="metadata"><h3>${escape(urlMeta.title)}</h3><small>${duration(urlMeta.duration)}</small>${rangeFields("url-range", urlRange)}</div><div class="import-actions"><label><input id="retain-media" type="checkbox" ${retainMedia ? "checked" : ""}>Keep downloaded media for playback</label><button class="primary" id="enqueue-url" ${state.dependencies.url?.ready && !enqueuingURL ? "" : "disabled"}>${enqueuingURL ? "Adding…" : "Add to queue"}</button></div>`;
+    `<div class="metadata"><label class="field"><span>Transcript name</span><input id="url-title" maxlength="200" value="${escape(urlTitle ?? urlMeta.title)}" placeholder="${escape(urlMeta.title)}" aria-describedby="url-title-help"></label><p id="url-title-help" class="range-help">Leave blank to use the source title.</p><small>${duration(urlMeta.duration)}</small>${rangeFields("url-range", urlRange)}</div><div class="import-actions"><label><input id="retain-media" type="checkbox" ${retainMedia ? "checked" : ""}>Keep downloaded media for playback</label><button class="primary" id="enqueue-url" ${state.dependencies.url?.ready && !enqueuingURL ? "" : "disabled"}>${enqueuingURL ? "Adding…" : "Add to queue"}</button></div>`;
   bindRange("url-range", urlRange, urlMeta.duration);
+  $("#url-title").oninput = (e) => { urlTitle = e.target.value; };
   $("#retain-media").onchange = (e) => (retainMedia = e.target.checked);
   $("#enqueue-url").onclick = async () => {
     if (enqueuingURL || !urlMeta) return;
@@ -713,10 +733,12 @@ function renderURL() {
         kind: "url",
         retain: $("#retain-media").checked,
         range: readRange(urlRange, urlMeta.duration),
+        title: (urlTitle || "").trim(),
       });
       if (version === urlVersion) {
         urlMeta = null;
         urlDraft = "";
+        urlTitle = null;
         urlRange = { start: "", end: "" };
         urlVersion++;
         retainMedia = false;
@@ -872,6 +894,7 @@ function renderQueue() {
           <div class="job-head"><span class="job-symbol">${icon(j.kind === "url" ? "link" : "file")}</span><div class="job-title"><h2>${escape(j.title)}</h2><span class="job-status" data-state="${escape(j.state)}">${escape(jobStates[j.state] || j.state)}</span><small>${duration(j.duration)}${rangeLabel(j.range) ? ` · ${rangeLabel(j.range)}` : ""}</small></div>
             <div class="controls">${j.sessionId ? `<button data-open="${j.sessionId}">Open transcript</button>` : ""}${!terminal.has(j.state) ? `<button data-cancel="${j.id}">Cancel</button>` : j.state !== "completed" ? `<button data-retry="${j.id}">Retry</button>` : ""}</div>
           </div>
+          ${j.state === "downloading" ? downloadProgressHTML(j) : ""}
           ${j.state === "transcribing" || j.state === "paused" || j.state === "completed" ? `<div class="job-progress"><progress max="1" value="${j.progress || 0}" aria-label="Transcription progress"></progress><span>${Math.floor((j.progress || 0) * 100)}%</span></div><small class="job-timing">${clock(j.processed)} processed · ${clock(j.elapsed)} elapsed</small>` : ""}
           ${j.error ? `<p class="job-error">${escape(j.error)}</p>` : ""}
         </article>`).join("") : `<div class="collection-empty"><span>${icon("queue")}</span><h2>Your queue is clear</h2><p>Import audio, video, or a link to get started.</p><button id="queue-import" class="primary">New transcription</button></div>`}</div>

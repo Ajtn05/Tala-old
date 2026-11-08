@@ -398,3 +398,54 @@ test("Dia and other browsers use chosen cookie exports and clear them when disab
   assert.equal(h.element("#cookie-file").value, "");
   assert.deepEqual(JSON.parse(JSON.stringify(h.requests.filter(r => r.action === "urlAuth").at(-1).data)), {browser: "", profile: ""});
 });
+
+test("fetched transcript names can be edited and survive navigation, updates, and refetching", async () => {
+  const h = harness();
+  await flush();
+  typeURL(h, "https://example.org/lecture");
+  await h.element("#fetch-url").onclick();
+  assert.equal(vm.runInContext("urlTitle", h.context), "Lecture");
+  h.element("#url-title").oninput({ target: { value: "My seminar & notes" } });
+  h.window.receive({ type: "jobs", data: [] });
+  vm.runInContext('navigate("settings"); navigate("new")', h.context);
+  assert.match(h.element("#url-details").innerHTML, /value="My seminar &amp; notes"/);
+  await h.element("#fetch-url").onclick();
+  assert.equal(vm.runInContext("urlTitle", h.context), "My seminar & notes");
+  await h.element("#enqueue-url").onclick();
+  assert.equal(h.requests.find(r => r.action === "enqueue").data.title, "My seminar & notes");
+  assert.equal(vm.runInContext("urlTitle", h.context), null);
+});
+
+test("blank names use the source title and new links reset the name draft", async () => {
+  const h = harness();
+  await flush();
+  typeURL(h, "https://example.org/lecture");
+  await h.element("#fetch-url").onclick();
+  h.element("#url-title").oninput({ target: { value: "   " } });
+  await h.element("#enqueue-url").onclick();
+  assert.equal(h.requests.find(r => r.action === "enqueue").data.title, "");
+  vm.runInContext('navigate("new")', h.context);
+  typeURL(h, "https://example.org/second");
+  await h.element("#fetch-url").onclick();
+  assert.equal(vm.runInContext("urlTitle", h.context), "Lecture");
+});
+
+test("download progress appears in home and queue with bytes, speed, and ETA", async () => {
+  const h = harness();
+  await flush();
+  const job = { id: "download", title: "Lecture", state: "downloading", progress: 0, download: { status: "downloading", downloaded: 1048576, total: 4194304, speed: 524288, eta: 6 } };
+  h.window.receive({ type: "jobs", data: [job] });
+  const home = h.element("#home-queue").innerHTML;
+  assert.match(home, /value="0.25"/);
+  assert.match(home, /25%/);
+  assert.match(home, /1.0 MiB \/ 4.0 MiB/);
+  assert.match(home, /512.0 KiB\/s/);
+  assert.match(home, /ETA 00:06/);
+  vm.runInContext('navigate("queue")', h.context);
+  assert.match(h.element("#content").innerHTML, /Download progress/);
+  job.download.total = 0;
+  h.window.receive({ type: "jobs", data: [job] });
+  const queue = h.element("#content").innerHTML;
+  assert.match(queue, /<progress max="1"  aria-label="Download progress"/);
+  assert.doesNotMatch(queue, /25%|0%/);
+});
